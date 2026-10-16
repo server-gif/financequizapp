@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>FinanceQuizApp - Test Your Knowledge</title>
+
+
+
+
+
+  <script async src="/adsess.js"></script>
+
+
+  <script src="https://cdn.tailwindcss.com" type="text/javascript"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="ads-keys.js"></script>
+
+</head>
+
+<body>
+  <main class="container">
+    <header class="header">
+
+    </header>
+    <div class="quiz-card" style="padding: 20px; text-align: left; line-height: 1.6;">
+      <h2 style="color: #83D4AB; margin-bottom: 20px; text-align: center;">Terms & Conditions</h2>
+      <p>Welcome to <span class="site-name">Our Site</span>! These terms and conditions outline the rules and
+        regulations for the use of <span class="site-name">Our Site</span>'s Website, located at <span
+          class="domain-name">ourwebsite.com</span>.</p>
+      <br>
+      <h3 style="color: #83D4AB;">1. Purely For Entertainment & No Rewards</h3>
+      <p><span class="site-name">Our Site</span> is strictly an entertainment platform. <strong>We do not offer any real
+          money, prizes, gifts, or financial rewards.</strong> Any "coins", "scores", or "points" earned while playing
+        our quizzes are purely virtual, exist only within the context of the website, and cannot be redeemed for
+        real-world value.</p>
+      <br>
+      <h3 style="color: #83D4AB;">2. Advertisements</h3>
+      <p>Our website is supported by third-party advertisements. By using <span class="site-name">Our Site</span>, you
+        agree to the display of these advertisements during your quiz experience.</p>
+      <br>
+      <h3 style="color: #83D4AB;">3. Prohibited Conduct & Violence</h3>
+      <p>We maintain a strict zero-tolerance policy towards violence, hate speech, illegal activities, and harmful
+        content. Users must not use our platform to spread violent, inappropriate, or malicious material. Any violation
+        will result in an immediate ban from the website.</p>
+      <br>
+      <h3 style="color: #83D4AB;">4. Acceptance of Terms</h3>
+      <p>By accessing this website, we assume you accept these terms and conditions. Do not continue to use <span
+          class="site-name">Our Site</span> if you do not agree to take all of the terms and conditions stated on this
+        page.</p>
+      <div style="text-align: center; margin-top: 30px;">
+        <a href="/"
+          style="display: inline-block; padding: 12px 24px; background: linear-gradient(45deg, #83D4AB, #C7D8D0); color: #0B1F1A; text-decoration: none; border-radius: 25px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">🏠
+          Back to Home</a>
+      </div>
+    </div>
+
+    <div class="footer-links" style="text-align: center; margin: 30px 0 20px 0; padding: 10px; font-size: 12px;">
+      <a href="/about.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">About Us</a>
+      <a href="/contact.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Contact Us</a>
+      <a href="/privacy-policy.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Privacy Policy</a>
+      <a href="/terms-conditions.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Terms &
+        Conditions</a>
+    </div>
+
+    <!----- Popup Ads -------->
+
+    <style>
+      /*
+#close-button{
+    cursor: pointer;
+    
+    background: transparent;
+    border: none;
+   
+    margin-bottom: 5px;
+    display: inline-block;
+    width: min-content;
+    color: #ff0000;
+}*/
+      #custom-interstitial-popup .close-wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 5px;
+        align-items: center;
+        gap: 2px;
+      }
+
+      div#count-down-wrap {
+        color: #000 !important;
+        font-size: 13px;
+      }
+
+      #custom-interstitial-popup .ads-label {
+        margin-top: 5px;
+        text-align: center;
+        margin-bottom: 0;
+        color: #333 !important;
+        margin-bottom: 5px;
+      }
+
+      /*---- New Design -----------*/
+
+      #custom-interstitial-popup #close-button {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: transparent;
+        border: 1px solid #ff4757;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before,
+      #custom-interstitial-popup #close-button::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 14px;
+        height: 2px;
+        background: #ff4757;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+
+      #custom-interstitial-popup #close-button::after {
+        transform: translate(-50%, -50%) rotate(-45deg);
+      }
+
+      #custom-interstitial-popup #close-button:hover {
+        background: #ff4757;
+        border-color: #ff4757;
+      }
+
+      #custom-interstitial-popup #close-button:hover::before,
+      #custom-interstitial-popup #close-button:hover::after {
+        background: white;
+      }
+
+      #custom-interstitial-popup #countdown {
+        color: #000 !important;
+      }
+
+      .ads-popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        align-items: center;
+        justify-content: center;
+        z-index: -1;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.3s ease;
+      }
+
+      /* Active state - visible */
+      .ads-popup-overlay.active {
+        opacity: 1;
+        visibility: visible;
+        z-index: 9999;
+      }
+
+      /* Popup box */
+      .ads-popup {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #fff;
+        border-radius: 14px;
+        padding: 25px 20px;
+        width: 80%;
+        max-width: 100%;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        animation: fadeInZoom 0.35s ease-out;
+      }
+
+      /* Ad label */
+      #adsPopup .ads-label {
+        font-size: 12px;
+        color: #333;
+        margin-top: 5px;
+        text-transform: uppercase;
+      }
+
+      /* Close button */
+      .ads-close-btn {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+        opacity: 0.8;
+        display: none;
+      }
+
+      .ads-close-btn.active {
+        display: block;
+      }
+
+      .ads-popup h3 {
+        color: #333;
+      }
+
+      /* Timer text */
+      .ads-loading {
+        position: absolute;
+        top: 8px;
+        /* right: 0; */
+        left: auto;
+        /* border: none; */
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+
+        color: #333;
+      }
+
+      .close-wrap {
+        margin-bottom: 30px;
+
+      }
+
+      @media (max-width: 768px) {
+        .ads-popup {
+          width: 100%;
+          max-width: 100%;
+        }
+      }
+    </style>
+    <div class="ads-popup-overlay" id="adsPopup">
+      <div class="ads-popup">
+        <div class="close-wrap">
+          <button class="ads-close-btn" id="closeAd">✖</button>
+          <div class="ads-loading" id="adTimer">⏳ Please wait 10 seconds...</div>
+        </div>
+        <div class="ads-container">
+          <div class="tops-ads ads">
+
+
+            <div class="ads-label">Advertisement</div>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+    <!--- End ------------->
+
+    <script src="script.js?v=1"></script>
+
+
+</body>
+
+</html>

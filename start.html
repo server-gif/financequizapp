@@ -1,0 +1,780 @@
+<style>
+  .container {
+    min-height: calc(100vh - 160px) !important;
+  }
+
+  /* Overlay background */
+  body .popup-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    backdrop-filter: blur(5px);
+  }
+
+  /* Popup box */
+  .popup-box {
+    background: white;
+    padding: 40px 35px;
+    border-radius: 25px;
+    width: 90%;
+    max-width: 400px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    animation: popupSlide 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
+
+  @keyframes popupSlide {
+    from {
+      transform: scale(0.7) translateY(-50px);
+      opacity: 0;
+    }
+
+    to {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* Icon animation */
+  .popup-icon {
+    font-size: 72px;
+    margin-bottom: 20px;
+    animation: iconPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes iconPulse {
+
+    0%,
+    100% {
+      transform: scale(1);
+    }
+
+    50% {
+      transform: scale(1.1);
+    }
+  }
+
+  /* Text styles */
+  .popup-title {
+    font-size: 24px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 15px;
+  }
+
+  .popup-message {
+    font-size: 16px;
+    line-height: 1.6;
+    color: #83D4AB !important;
+    margin-bottom: 25px;
+  }
+
+  /* Reward highlight box */
+  .reward-highlight {
+    background: linear-gradient(135deg, #83D4AB 0%, #C7D8D0 100%);
+    padding: 15px 20px;
+    border-radius: 15px;
+    margin-bottom: 30px;
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
+  }
+
+  .reward-text {
+    font-size: 18px;
+    font-weight: bold;
+    color: #333 !important;
+    margin: 0;
+  }
+
+  /* Buttons */
+  .popup-buttons {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 14px 30px;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    font-weight: bold;
+    font-size: 15px;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .cancel {
+    background: #e0e0e0;
+    color: #666;
+    flex: 1;
+  }
+
+  .cancel:hover {
+    background: #d0d0d0;
+    transform: translateY(-2px);
+  }
+
+  .watch {
+    background: linear-gradient(135deg, #123C32 0%, #2E7D5B 100%);
+    color: white;
+    flex: 2;
+    box-shadow: 0 6px 20px rgba(245, 87, 108, 0.4);
+  }
+
+  .watch:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(245, 87, 108, 0.5);
+  }
+
+  .btn:active {
+    transform: translateY(0);
+  }
+</style>
+<script type="text/javascript" src="https://cdn.tailwindcss.com"></script>
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>FinanceQuizApp - Test Your Knowledge</title>
+
+
+
+
+
+  <script async src="https://securepubads.g.doubleclick.net/tag/js/gpt.js"></script>
+
+
+  <script src="https://cdn.tailwindcss.com" type="text/javascript"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="ads-keys.js"></script>
+
+</head>
+
+<body>
+  <main class="container">
+    <header class="header">
+
+    </header>
+
+    <div class="quiz-category">
+      <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h2 id="sidebar-title">FinanceQuiz</h2>
+          <p>Play, Learn &amp; Win!</p>
+        </div>
+        <button class="close-sidebar-btn" id="closeSidebar">×</button>
+        <div class="sidebar-menu">
+          <div class="menu-item"><a href="index.html"><span class="menu-item-icon">🏠</span> <span>Home</span></a></div>
+          <div class="menu-item"><a href="score.html"><span class="menu-item-icon">🏆</span>
+              <span>Leaderboard</span></a></div>
+          <div class="menu-item"><a href="score.html"><span class="menu-item-icon">📊</span> <span>My Stats</span></a>
+          </div>
+          <div class="menu-item"><a href="score.html"><span class="menu-item-icon">🎯</span>
+              <span>Achievements</span></a></div>
+          <div class="menu-item"><a href="score.html"><span class="menu-item-icon">💰</span> <span>Earn Coins</span></a>
+          </div>
+          <div class="menu-item"><a href="score.html"><span class="menu-item-icon">👥</span> <span>Friends</span></a>
+          </div>
+        </div>
+        <div class="sidebar-footer">
+          <div class="menu-item"><span class="menu-item-icon">⚙️</span> <span class="menu-item-text">Settings</span>
+          </div>
+          <div class="menu-item"><span class="menu-item-icon">ℹ️</span> <span class="menu-item-text">Help &amp;
+              Support</span>
+          </div>
+        </div>
+      </div><!-- Overlay -->
+      <div class="overlay" id="overlay"></div><!-- Top Bar -->
+      <header class="top-bar"><button class="menu-btn" id="menuBtn">☰</button>
+        <h1 class="logo" id="app-title">FinanceQuiz</h1>
+        <div class="coins">
+          +<span id="coin-count"><img src="small-coin.png"><span class="coin_set">200</span></span>
+        </div>
+
+      </header>
+      <div class="ads-container">
+        <div class="tops-ads ads">
+          <div id="global-ads-online-ads-wrap-1" class="custom-gpt-ad"></div>
+
+
+
+          <script>
+            window.googletag = window.googletag || { cmd: [] };
+            googletag.cmd.push(function () {
+              googletag.defineSlot(adsKeys.display_001, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-1').addService(googletag.pubads());
+              googletag.pubads().enableSingleRequest();
+              googletag.enableServices();
+              googletag.display('global-ads-online-ads-wrap-1');
+            });
+          </script>
+
+
+          <div class="ads-label">
+            <span>Advertisement</span>
+          </div>
+        </div>
+      </div>
+
+
+
+
+      <div class="category-bar"><button class="arrow left" id="scrollLeft">❮</button>
+        <div class="category-scroll" id="categoryScroll">
+          <div class="category-tabs"><button class="tab active" data-category="all">ALL</button> <button class="tab"
+              data-category="business">BUSINESS AND ECONOMICS</button> <button class="tab"
+              data-category="history">HISTORY</button> <button class="tab" data-category="math">MATH AND LOGIC</button>
+            <button class="tab" data-category="world">WORLD</button> <button class="tab"
+              data-category="travel">TRAVEL</button> <button class="tab"
+              data-category="entertainment">ENTERTAINMENT</button> <button class="tab"
+              data-category="sports">SPORTS</button>
+          </div>
+        </div><button class="arrow right" id="scrollRight">❯</button>
+      </div><!-- Quiz List -->
+
+
+      <div class="quiz-list" id="quizList">
+        <a href="#" class="quiz-card play-quiz-start" data-category="business">
+          <div class="quiz-card-icon">💼</div>
+          <div class="details">
+            <p class="category">Business And Economics | Companies</p>
+            <h3 id="quiz-title-1">Play and Win <span id="prize-1">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-1">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+
+        </a>
+
+        <a href="#" class="quiz-card play-quiz-start" data-category="history">
+          <div class="quiz-card-icon">📜</div>
+          <div class="details">
+            <p class="category">History | War</p>
+            <h3 id="quiz-title-2">Play and Win <span id="prize-2">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-2">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+        </a>
+        <div class="ads-container">
+          <div class="tops-ads ads">
+            <div id="global-ads-online-ads-wrap-2" class="custom-gpt-ad"></div>
+
+
+
+            <script>
+              window.googletag = window.googletag || { cmd: [] };
+              googletag.cmd.push(function () {
+                googletag.defineSlot(adsKeys.display_002, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-2').addService(googletag.pubads());
+                googletag.pubads().enableSingleRequest();
+                googletag.enableServices();
+                googletag.display('global-ads-online-ads-wrap-2');
+              });
+            </script>
+
+
+            <div class="ads-label">
+              <span>Advertisement</span>
+            </div>
+          </div>
+        </div>
+
+
+
+
+        <a href="#" class="quiz-card play-quiz-start" data-category="sports">
+          <div class="quiz-card-icon">⚽</div>
+          <div class="details">
+            <p class="category">Sports | ICC World Cup</p>
+            <h3 id="quiz-title-3">Play and Win <span id="prize-3">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-3">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+        </a>
+
+        <a href="#" class="quiz-card play-quiz-start" data-category="math">
+          <div class="quiz-card-icon">🔢</div>
+          <div class="details">
+            <p class="category">Math And Logic | Puzzles</p>
+            <h3 id="quiz-title-4">Play and Win <span id="prize-4">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-4">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+        </a>
+
+        <a href="#" class="quiz-card play-quiz-start" data-category="entertainment">
+          <div class="quiz-card-icon">🎬</div>
+          <div class="details">
+            <p class="category">Entertainment | Movies</p>
+            <h3 id="quiz-title-5">Play and Win <span id="prize-5">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-5">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+        </a>
+
+        <a href="#" class="quiz-card play-quiz-start" data-category="world">
+          <div class="quiz-card-icon">🌍</div>
+          <div class="details">
+            <p class="category">World | Geography</p>
+            <h3 id="quiz-title-6">Play and Win <span id="prize-6">2000</span></h3>
+            <span class="entry-fee">Entry Fee <img src="small-coin.png" style="width:15px;"> <span
+                id="fee-6">100</span></span>
+          </div>
+          <div class="play-btn"><svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 448 512"
+              class="play_icon" height="1em" width="1em" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M424.4 214.7L72.4 6.6C43.8-10.3 0 6.1 0 47.9V464c0 37.5 40.7 60.1 72.4 41.3l352-208c31.4-18.5 31.5-64.1 0-82.6z">
+              </path>
+            </svg>
+          </div>
+        </a>
+      </div>
+
+
+
+
+    </div>
+
+
+
+    <div id="coinAlert" class="popup-overlay">
+      <div class="popup-box">
+        <div class="popup-icon">😔</div>
+        <h2 class="popup-title">Insufficient Coins</h2>
+        <p class="popup-message">You don't have enough coins to play this contest.</p>
+
+        <div class="reward-highlight">
+          <p class="reward-text">🎁 Watch a video ad to get 100 reward coins!</p>
+        </div>
+
+        <div class="popup-buttons">
+          <button id="cancelBtn" class="btn cancel">Cancel</button>
+          <button id="watchBtn" class="btn watch">▶️ Watch Ads</button>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="footer-links" style="text-align: center; margin: 30px 0 20px 0; padding: 10px; font-size: 12px;">
+      <a href="/about.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">About Us</a>
+      <a href="/contact.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Contact Us</a>
+      <a href="/privacy-policy.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Privacy Policy</a>
+      <a href="/terms-conditions.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Terms &
+        Conditions</a>
+    </div>
+
+    <!----- Popup Ads -------->
+
+    <style>
+      /*
+#close-button{
+    cursor: pointer;
+    
+    background: transparent;
+    border: none;
+   
+    margin-bottom: 5px;
+    display: inline-block;
+    width: min-content;
+    color: #ff0000;
+}*/
+      #custom-interstitial-popup .close-wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 5px;
+        align-items: center;
+        gap: 2px;
+      }
+
+      div#count-down-wrap {
+        color: #000 !important;
+        font-size: 13px;
+      }
+
+      #custom-interstitial-popup .ads-label {
+        margin-top: 5px;
+        text-align: center;
+        margin-bottom: 0;
+        color: #333 !important;
+        margin-bottom: 5px;
+      }
+
+      /*---- New Design -----------*/
+
+      #custom-interstitial-popup #close-button {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: transparent;
+        border: 1px solid #ff4757;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before,
+      #custom-interstitial-popup #close-button::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 14px;
+        height: 2px;
+        background: #ff4757;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+
+      #custom-interstitial-popup #close-button::after {
+        transform: translate(-50%, -50%) rotate(-45deg);
+      }
+
+      #custom-interstitial-popup #close-button:hover {
+        background: #ff4757;
+        border-color: #ff4757;
+      }
+
+      #custom-interstitial-popup #close-button:hover::before,
+      #custom-interstitial-popup #close-button:hover::after {
+        background: white;
+      }
+
+      #custom-interstitial-popup #countdown {
+        color: #000 !important;
+      }
+
+      .ads-popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        align-items: center;
+        justify-content: center;
+        z-index: -1;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.3s ease;
+      }
+
+      /* Active state - visible */
+      .ads-popup-overlay.active {
+        opacity: 1;
+        visibility: visible;
+        z-index: 9999;
+      }
+
+      /* Popup box */
+      .ads-popup {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #fff;
+        border-radius: 14px;
+        padding: 25px 20px;
+        width: 80%;
+        max-width: 100%;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        animation: fadeInZoom 0.35s ease-out;
+      }
+
+      /* Ad label */
+      #adsPopup .ads-label {
+        font-size: 12px;
+        color: #333;
+        margin-top: 5px;
+        text-transform: uppercase;
+      }
+
+      /* Close button */
+      .ads-close-btn {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+        opacity: 0.8;
+        display: none;
+      }
+
+      .ads-close-btn.active {
+        display: block;
+      }
+
+      .ads-popup h3 {
+        color: #333;
+      }
+
+      /* Timer text */
+      .ads-loading {
+        position: absolute;
+        top: 8px;
+        /* right: 0; */
+        left: auto;
+        /* border: none; */
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+
+        color: #333;
+      }
+
+      .close-wrap {
+        margin-bottom: 30px;
+
+      }
+
+      @media (max-width: 768px) {
+        .ads-popup {
+          width: 100%;
+          max-width: 100%;
+        }
+      }
+    </style>
+    <div class="ads-popup-overlay" id="adsPopup">
+      <div class="ads-popup">
+        <div class="close-wrap">
+          <button class="ads-close-btn" id="closeAd">✖</button>
+          <div class="ads-loading" id="adTimer">⏳ Please wait 10 seconds...</div>
+        </div>
+        <div class="ads-container">
+          <div class="tops-ads ads">
+
+
+            <div class="ads-label">Advertisement</div>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+    <!--- End ------------->
+
+    <script src="script.js?v=1"></script>
+
+
+</body>
+
+</html>
+
+<script>
+  const config = {
+    app_title: "FinanceQuiz",
+    quiz_prize: "2000",
+    entry_fee: "100"
+  };
+
+
+  async function onConfigChange(config) {
+    const appTitle = config.app_title || defaultConfig.app_title;
+    const quizPrize = config.quiz_prize || defaultConfig.quiz_prize;
+    const entryFee = config.entry_fee || defaultConfig.entry_fee;
+
+    document.getElementById('app-title').textContent = appTitle;
+    document.getElementById('sidebar-title').textContent = appTitle;
+
+    for (let i = 1; i <= 6; i++) {
+      const prizeElement = document.getElementById(`prize-${i}`);
+      const feeElement = document.getElementById(`fee-${i}`);
+      if (prizeElement) prizeElement.textContent = quizPrize;
+      if (feeElement) feeElement.textContent = entryFee;
+    }
+  }
+
+  if (window.elementSdk) {
+    window.elementSdk.init({
+      defaultConfig,
+      onConfigChange,
+      mapToCapabilities: (config) => ({
+        recolorables: [],
+        borderables: [],
+        fontEditable: undefined,
+        fontSizeable: undefined
+      }),
+      mapToEditPanelValues: (config) => new Map([
+        ["app_title", config.app_title || defaultConfig.app_title],
+        ["quiz_prize", config.quiz_prize || defaultConfig.quiz_prize],
+        ["entry_fee", config.entry_fee || defaultConfig.entry_fee]
+      ])
+    });
+  }
+
+  // Sidebar functionality
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('overlay');
+  const menuBtn = document.getElementById('menuBtn');
+
+  function openSidebar() {
+    console.log('Opening sidebar...');
+    sidebar.classList.add('open');
+    overlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebar() {
+    console.log('Closing sidebar...');
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  // Wait for DOM to be fully loaded
+  document.addEventListener('DOMContentLoaded', function () {
+    const menuButton = document.getElementById('menuBtn');
+    if (menuButton) {
+      menuButton.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Menu button clicked!');
+        openSidebar();
+      });
+    }
+  });
+
+  // Fallback event listener
+  if (menuBtn) {
+    menuBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('Menu button clicked (fallback)!');
+      openSidebar();
+    });
+  }
+
+  if (overlay) {
+    overlay.addEventListener('click', closeSidebar);
+  }
+
+  // Close sidebar when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!sidebar.contains(e.target) && !menuBtn.contains(e.target) && sidebar.classList.contains('open')) {
+      closeSidebar();
+    }
+  });
+
+  // Close sidebar on escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebar.classList.contains('open')) {
+      closeSidebar();
+    }
+  });
+
+  // Category scroll
+  const categoryScroll = document.getElementById('categoryScroll');
+  const scrollLeft = document.getElementById('scrollLeft');
+  const scrollRight = document.getElementById('scrollRight');
+
+  scrollLeft.addEventListener('click', () => {
+    categoryScroll.scrollBy({ left: -200, behavior: 'smooth' });
+  });
+
+  scrollRight.addEventListener('click', () => {
+    categoryScroll.scrollBy({ left: 200, behavior: 'smooth' });
+  });
+
+  // Category filter
+  const tabs = document.querySelectorAll('.tab');
+  const quizCards = document.querySelectorAll('.quiz-card');
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+
+      const category = tab.dataset.category;
+
+      quizCards.forEach(card => {
+        if (category === 'all' || card.dataset.category === category) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    });
+  });
+
+  // Play button functionality
+  const playButtons = document.querySelectorAll('.play-btn');
+  playButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const card = btn.closest('.quiz-card');
+      card.style.transform = 'scale(0.95)';
+      setTimeout(() => {
+        card.style.transform = '';
+      }, 200);
+    });
+  });
+
+  // Initialize with config
+  onConfigChange(config);
+  document.addEventListener('DOMContentLoaded', function () {
+    const closeSidebarBtn = document.getElementById('closeSidebar');
+    if (closeSidebarBtn) {
+      closeSidebarBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        closeSidebar();
+      });
+    }
+  });
+  // Close popup
+  document.getElementById('cancelBtn').addEventListener('click', () => {
+    document.getElementById('coinAlert').style.display = 'none';
+  });
+</script>

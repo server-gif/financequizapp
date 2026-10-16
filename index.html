@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>FinanceQuizApp - Test Your Knowledge</title>
+
+
+  <script async src="/adsess.js"></script>
+  <script async src="/google-reward.js"></script>
+
+
+  <script src="https://cdn.tailwindcss.com" type="text/javascript"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="ads-keys.js"></script>
+
+</head>
+
+<body>
+  <main class="container">
+    <header class="header">
+
+    </header>
+
+    <div class="ads-container">
+      <div class="tops-ads ads">
+        <div id="global-ads-online-ads-wrap-1" class="custom-gpt-ad"></div>
+
+
+
+        <script>
+          window.googletag = window.googletag || { cmd: [] };
+          googletag.cmd.push(function () {
+            googletag.defineSlot(adsKeys.display_001, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-1').addService(googletag.pubads());
+            googletag.pubads().enableSingleRequest();
+            googletag.enableServices();
+            googletag.display('global-ads-online-ads-wrap-1');
+          });
+        </script>
+
+
+        <div class="ads-label">
+          <span>Advertisement</span>
+        </div>
+      </div>
+    </div>
+
+
+
+
+
+    <script>
+      let currentQuestion = (function () {
+        var q = parseInt(new URLSearchParams(window.location.search).get('question'), 10);
+        if (isNaN(q) || q < 0) q = 0;
+        return q;
+      })();
+    </script>
+
+    <div class="quiz-card" id="quizCard">
+
+
+      <div class="score-display" style="display:none;">
+        Score: <span class="score-number" id="scoreDisplay">0</span>
+      </div>
+      <div class="question-counter" id="questionCounter">Question 1 of 2</div>
+      <div class="question" id="questionText">What is the capital of France?</div>
+
+      <div class="options" id="optionsContainer">
+        <div class="option" data-answer="Paris">Paris</div>
+        <div class="option" data-answer="London">London</div>
+        <div class="option" data-answer="Berlin">Berlin</div>
+        <div class="option" data-answer="Madrid">Madrid</div>
+      </div>
+
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+
+    </div>
+
+
+    <div class="ads-container margin-top-20px">
+      <div class="tops-ads ads">
+        <div id="global-ads-online-ads-wrap-2" class="custom-gpt-ad"></div>
+        <script>
+          (function () {
+            var s = document.currentScript;
+            var uri = window.location.pathname + window.location.search;
+            var isHomePage = (uri === '/' || uri === '/index.html' || uri === '/index.html');
+            if (isHomePage) {
+              // clean home URL: remove the block (matches PHP hiding it on '/')
+              var block = (s && s.closest) ? s.closest('.ads-container') : null;
+              if (block && block.parentNode) block.parentNode.removeChild(block);
+              return;
+            }
+            // has a query string (e.g. ?utm_source=...): show the ad, like PHP
+            window.googletag = window.googletag || { cmd: [] };
+            googletag.cmd.push(function () {
+              googletag.defineSlot(adsKeys.display_003, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-2').addService(googletag.pubads());
+              googletag.pubads().enableSingleRequest();
+              googletag.enableServices();
+              googletag.display('global-ads-online-ads-wrap-2');
+            });
+          })();
+        </script>
+        <div class="ads-label">
+          <span>Advertisement</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-content">
+      <div class="featured-section mt-4">
+        <h3>Why Choose Our Quiz Platform?</h3>
+        <div class="features-grid">
+          <div class="feature-item">
+            <h5>🏆 Daily Rewards</h5>
+            <p>Login daily to get bonus coins and special rewards</p>
+          </div>
+          <div class="feature-item">
+            <h5>📱 Mobile Friendly</h5>
+            <p>Play seamlessly on any device - mobile, tablet, or desktop</p>
+          </div>
+          <div class="feature-item">
+            <h5>⚡ Live Contests</h5>
+            <p>Join real-time quiz competitions with players worldwide</p>
+          </div>
+        </div>
+      </div>
+      <div class="fact_box">
+        <h5>#Fun Fact</h5>
+        <p>Mahendara Singh Dhoni clenches a title of being the most successful captain in the IPL history.</p>
+      </div>
+      <div class="how-to-play mt-4">
+        <h3>How to Play?</h3>
+        <ol class="play-steps">
+          <li>Select your favorite quiz category</li>
+          <li>Answer questions correctly to earn coins</li>
+          <li>Compete on leaderboards</li>
+          <li>Redeem coins for exciting rewards</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="quiz-card" id="resultCard" style="display: none;">
+      <div class="result-card">
+        <h2 class="result-title" id="resultTitle">Quiz Complete!</h2>
+        <p class="result-message" id="resultMessage">Great job! You've completed the quiz.</p>
+
+        <div class="stats">
+          <div class="stat-item">
+            <div class="stat-number" id="finalScore">0</div>
+            <div class="stat-label">Final Score</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" id="correctAnswers">0</div>
+            <div class="stat-label">Correct</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-number" id="accuracy">0%</div>
+            <div class="stat-label">Accuracy</div>
+          </div>
+        </div>
+
+        <button class="restart-btn" id="restartBtn">Play Again</button>
+      </div>
+    </div>
+    <div class="footer-links" style="text-align: center; margin: 30px 0 20px 0; padding: 10px; font-size: 12px;">
+      <a href="/about.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">About Us</a>
+      <a href="/contact.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Contact Us</a>
+      <a href="/privacy-policy.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Privacy Policy</a>
+      <a href="/terms-conditions.html" style="color: #83D4AB; text-decoration: none; margin: 0 10px;">Terms &
+        Conditions</a>
+    </div>
+
+    <!----- Popup Ads -------->
+
+    <style>
+      /*
+#close-button{
+    cursor: pointer;
+    
+    background: transparent;
+    border: none;
+   
+    margin-bottom: 5px;
+    display: inline-block;
+    width: min-content;
+    color: #ff0000;
+}*/
+      #custom-interstitial-popup .close-wrap {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 5px;
+        align-items: center;
+        gap: 2px;
+      }
+
+      div#count-down-wrap {
+        color: #000 !important;
+        font-size: 13px;
+      }
+
+      #custom-interstitial-popup .ads-label {
+        margin-top: 5px;
+        text-align: center;
+        margin-bottom: 0;
+        color: #333 !important;
+        margin-bottom: 5px;
+      }
+
+      /*---- New Design -----------*/
+
+      #custom-interstitial-popup #close-button {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+        background: transparent;
+        border: 1px solid #ff4757;
+        cursor: pointer;
+        position: relative;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before,
+      #custom-interstitial-popup #close-button::after {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 14px;
+        height: 2px;
+        background: #ff4757;
+        transition: all 0.3s ease;
+      }
+
+      #custom-interstitial-popup #close-button::before {
+        transform: translate(-50%, -50%) rotate(45deg);
+      }
+
+      #custom-interstitial-popup #close-button::after {
+        transform: translate(-50%, -50%) rotate(-45deg);
+      }
+
+      #custom-interstitial-popup #close-button:hover {
+        background: #ff4757;
+        border-color: #ff4757;
+      }
+
+      #custom-interstitial-popup #close-button:hover::before,
+      #custom-interstitial-popup #close-button:hover::after {
+        background: white;
+      }
+
+      #custom-interstitial-popup #countdown {
+        color: #000 !important;
+      }
+
+      .ads-popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        align-items: center;
+        justify-content: center;
+        z-index: -1;
+        opacity: 0;
+        visibility: hidden;
+        transition: opacity 0.3s ease;
+      }
+
+      /* Active state - visible */
+      .ads-popup-overlay.active {
+        opacity: 1;
+        visibility: visible;
+        z-index: 9999;
+      }
+
+      /* Popup box */
+      .ads-popup {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #fff;
+        border-radius: 14px;
+        padding: 25px 20px;
+        width: 80%;
+        max-width: 100%;
+        text-align: center;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+        animation: fadeInZoom 0.35s ease-out;
+      }
+
+      /* Ad label */
+      #adsPopup .ads-label {
+        font-size: 12px;
+        color: #333;
+        margin-top: 5px;
+        text-transform: uppercase;
+      }
+
+      /* Close button */
+      .ads-close-btn {
+        position: absolute;
+        top: 8px;
+        right: 12px;
+        background: #2563eb;
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+        opacity: 0.8;
+        display: none;
+      }
+
+      .ads-close-btn.active {
+        display: block;
+      }
+
+      .ads-popup h3 {
+        color: #333;
+      }
+
+      /* Timer text */
+      .ads-loading {
+        position: absolute;
+        top: 8px;
+        /* right: 0; */
+        left: auto;
+        border: none;
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+
+        color: #333;
+      }
+
+      .close-wrap {
+        margin-bottom: 30px;
+
+      }
+
+      @media (max-width: 768px) {
+        .ads-popup {
+          width: 100%;
+          max-width: 100%;
+        }
+      }
+    </style>
+    <div class="ads-popup-overlay" id="adsPopup">
+      <div class="ads-popup">
+        <div class="close-wrap">
+          <button class="ads-close-btn" id="closeAd">✖</button>
+          <div class="ads-loading" id="adTimer">⏳ Please wait 10 seconds...</div>
+        </div>
+        <div class="ads-container">
+          <div class="tops-ads ads">
+
+
+            <div class="ads-label">Advertisement</div>
+          </div>
+        </div>
+
+
+      </div>
+    </div>
+    <!--- End ------------->
+
+    <script src="script.js?v=1"></script>
+
+
+</body>
+
+</html>
