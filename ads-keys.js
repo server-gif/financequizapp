@@ -18,13 +18,15 @@ window.googletag = window.googletag || { cmd: [] };
 
 let interstitialSlot;
 
-// Enable single request ONCE (new API; old enableSingleRequest is deprecated
-// and calling it per-slot caused "Format already created on the page" errors).
-if (typeof googletag.setConfig === "function") {
-  googletag.setConfig({ singleRequest: true });
-} else {
-  googletag.pubads().enableSingleRequest();
-}
+// Enable single request ONCE — must run INSIDE googletag.cmd (before gpt.js
+// loads, the stub has no setConfig/pubads, causing a TypeError at top level).
+googletag.cmd.push(function () {
+  if (typeof googletag.setConfig === "function") {
+    googletag.setConfig({ singleRequest: true });
+  } else {
+    googletag.pubads().enableSingleRequest();
+  }
+});
 
 googletag.cmd.push(function () {
   interstitialSlot = googletag.defineOutOfPageSlot(

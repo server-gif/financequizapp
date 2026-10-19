@@ -192,9 +192,9 @@
                             rewardVisible = true;
                             event.makeRewardedVisible();
 
-                            // Watchdog: if the creative gets stuck (black screen — neither
+                            // Watchdog: if the creative is blank/stuck (black screen — neither
                             // rewardedSlotGranted nor rewardedSlotClosed ever fires),
-                            // destroy the slot and show the interstitial instead.
+                            // destroy the slot quickly and show the interstitial instead.
                             stuckWatchdog = setTimeout(function () {
                                 if (rewardDone || !rewardVisible) return;
                                 console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
@@ -208,7 +208,7 @@
                                 rewardHandled = false;    // allow the fallback to run
                                 rewardReadyFired = false; // (guard checks both flags)
                                 showInterstitialFallback();
-                            }, 15000);
+                            }, 6000);
                         }
                     );
 
