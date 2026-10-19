@@ -133,9 +133,11 @@
                     var pubads = googletag.pubads();
 
                     // slotId -> isEmpty, filled from real slotRenderEnded events.
+                    // NOTE: this GPT build has no e.slotId — read it from the slot.
                     var renderInfo = {};
                     pubads.addEventListener('slotRenderEnded', function (e) {
-                        renderInfo[e.slotId] = e.isEmpty;
+                        var id = e.slot ? e.slot.getSlotElementId() : e.slotId;
+                        if (id) renderInfo[id] = e.isEmpty;
                     });
 
                     function isFilled(slotId) {
@@ -184,6 +186,8 @@
                     function revealDisplayAdIfFilled() {
                         if (!displayWrap) return;
                         if (isFilled(displaySlotId)) {
+                            adShown = true;
+                            escalated = true;
                             console.log('Display ad filled → showing it.');
                             displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;';
                         } else {
@@ -220,7 +224,43 @@
                         }
                     }
 
+                    /* ---------- ESCALATE: fresh interstitial, then display ad ---------- */
+                    // GPT ignores display()/refresh() on an already-requested out-of-page
+                    // slot, so a real re-request needs destroy + redefine + display.
+                    var escalated = false;
+
+                    function escalateNow(reason) {
+                        if (escalated) return;
+                        escalated = true;
+                        console.log('Escalating (' + reason + ') → interstitial.');
+                        if (interSlot) {
+                            try { googletag.destroySlots([interSlot]); } catch (e) { }
+                            interSlot = null;
+                        }
+                        var fresh = googletag.defineOutOfPageSlot(
+                            window.adsKeys.interstitial_001,
+                            googletag.enums.OutOfPageFormat.INTERSTITIAL
+                        );
+                        if (!fresh) { revealDisplayAdIfFilled(); return; }
+                        interSlot = fresh;
+                        fresh.addService(pubads);
+                        var fid = fresh.getSlotElementId();
+                        googletag.display(fresh);
+                        setTimeout(function () {
+                            if (!isFilled(fid)) revealDisplayAdIfFilled();
+                        }, 4000);
+                    }
+
                     /* ---------- TIER 1: rewarded ---------- */
+                    // A GAM rewarded slot reports "filled" even when its video creative
+                    // cannot deliver a media file (black screen, frozen progress bar), so
+                    // repeated breakage is remembered and reward is skipped for a while.
+                    var STRIKE_KEY = 'fqRewardBrokenStrikes';
+                    function saveStrikes(n) { try { localStorage.setItem(STRIKE_KEY, String(n)); } catch (e) { } }
+                    var brokenStrikes = 0;
+                    try { brokenStrikes = parseInt(localStorage.getItem(STRIKE_KEY) || '0', 10) || 0; } catch (e) { }
+                    var skipReward = brokenStrikes >= 2;
+
                     var rewardedSlot = googletag.defineOutOfPageSlot(
                         window.adsKeys.rewoarded_001, // GAM rewarded ad unit
                         googletag.enums.OutOfPageFormat.REWARDED
@@ -231,8 +271,20 @@
                     var rewardFilled = false;  // rewardedSlotReady fired (= creative loaded)
                     var rewardVisible = false;
                     var rewardDone = false;
+                    var rewardGranted = false;
+                    var rewardShownAt = 0;
                     var gestureHappened = false;
                     var adShown = false;       // one ad only
+
+                    function hideReward() {
+                        if (!rewardedSlot) return;
+                        try {
+                            var oop = document.getElementById(rewardedSlot.getSlotElementId());
+                            if (oop) oop.style.setProperty('display', 'none', 'important');
+                        } catch (e) { }
+                        try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
+                        rewardedSlot = null;
+                    }
 
                     // Video creatives render BLACK unless revealed with a user gesture.
                     var revealReward = (function () {
@@ -242,21 +294,19 @@
                             runOnce = true;
                             rewardVisible = true;
                             adShown = true;
+                            rewardShownAt = Date.now();
                             console.log('Rewarded ad filled → showing it.');
                             revealEvent.makeRewardedVisible();
 
-                            // If this creative never completes (stuck), hide it and fall
-                            // back to the display ad — but only if that one actually filled.
+                            // Safety net: a creative that never plays out (black screen the
+                            // visitor just ignores) must not stay on screen forever.
                             setTimeout(function () {
                                 if (rewardDone) return;
-                                console.log('Rewarded ad did not play out → hiding it (no blank screen).');
-                                try {
-                                    var oop = document.getElementById(rewardedSlot.getSlotElementId());
-                                    if (oop) oop.style.setProperty('display', 'none', 'important');
-                                } catch (e) { }
-                                try { googletag.destroySlots([rewardedSlot]); } catch (err) { }
-                                revealDisplayAdIfFilled();
-                            }, 20000);
+                                console.log('Rewarded ad never played out → hiding it (no blank screen).');
+                                saveStrikes(brokenStrikes + 1);
+                                hideReward();
+                                escalateNow('rewarded creative did not play');
+                            }, 45000);
                         };
                     })();
 
@@ -275,11 +325,21 @@
 
                     var revealEvent = null;
 
-                    if (rewardedSlot) {
+                    if (!rewardedSlot) {
+                        console.log('Rewarded format not supported on this device.');
+                        googletag.enableServices();
+                        escalateNow('rewarded unsupported');
+                    } else if (skipReward) {
+                        // reward broke black on recent visits → don't show a blank screen again
+                        console.log('Rewarded skipped after ' + brokenStrikes + ' broken plays → interstitial first.');
+                        googletag.enableServices();
+                        hideReward();
+                        escalateNow('rewarded marked broken');
+                    } else {
                         rewardedSlot.addService(pubads);
 
                         pubads.addEventListener('rewardedSlotReady', function (event) {
-                            if (event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
+                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             if (adShown) return; // a lower tier already took over
                             console.log('Rewarded ad filled — waiting for first tap to play (avoids black screen).');
                             revealEvent = event;
@@ -293,35 +353,42 @@
                             if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             console.log('Reward granted.');
                             rewardDone = true;
+                            rewardGranted = true;
+                            saveStrikes(0); // it plays fine again → reward gets priority back
                         });
 
                         pubads.addEventListener('rewardedSlotClosed', function (event) {
                             if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             console.log('Rewarded ad closed.');
                             rewardDone = true;
+                            // Closed almost straight away with no reward = the visitor saw a
+                            // broken (black) creative → escalate now, don't leave them stuck.
+                            if (!rewardGranted && rewardShownAt && Date.now() - rewardShownAt < 12000) {
+                                console.log('Rewarded closed without playing → treated as broken.');
+                                saveStrikes(brokenStrikes + 1);
+                                hideReward();
+                                escalateNow('rewarded closed unplayed');
+                            }
                         });
 
                         googletag.enableServices();
                         googletag.display(rewardedSlot);
-                    } else {
-                        console.log('Rewarded format not supported on this device.');
-                        googletag.enableServices();
                     }
 
                     /* ---------- DECISION: pick the tier that really filled ---------- */
                     setTimeout(function () {
-                        if (adShown || rewardFilled) return; // rewarded wins (or is revealing)
+                        if (adShown || rewardFilled || escalated) return; // reward won / already escalated
 
                         if (isFilled(interSlotId)) {
                             console.log('Rewarded unavailable → interstitial filled, GPT will show it.');
                             adShown = true;
                             discardDisplayAd();
+                            hideReward(); // no longer needed; keeps getSlots() clean
                             return;
                         }
 
-                        console.log('Rewarded + interstitial unavailable → trying display ad.');
-                        // give the hidden display slot a moment to report, then decide
-                        setTimeout(revealDisplayAdIfFilled, 2500);
+                        hideReward(); // rewarded no-filled → drop the dead slot
+                        escalateNow('no rewarded fill');
                     }, 8000);
                 });
             }
