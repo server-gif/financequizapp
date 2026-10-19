@@ -18,6 +18,14 @@ window.googletag = window.googletag || { cmd: [] };
 
 let interstitialSlot;
 
+// Enable single request ONCE (new API; old enableSingleRequest is deprecated
+// and calling it per-slot caused "Format already created on the page" errors).
+if (typeof googletag.setConfig === "function") {
+  googletag.setConfig({ singleRequest: true });
+} else {
+  googletag.pubads().enableSingleRequest();
+}
+
 googletag.cmd.push(function () {
   interstitialSlot = googletag.defineOutOfPageSlot(
     adsKeys.interstitial_001,
@@ -26,8 +34,6 @@ googletag.cmd.push(function () {
 
   if (interstitialSlot) {
     interstitialSlot.addService(googletag.pubads());
-
-    googletag.pubads().enableSingleRequest();
 
     googletag.enableServices();
   }

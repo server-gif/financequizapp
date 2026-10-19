@@ -40,7 +40,6 @@
           window.googletag = window.googletag || { cmd: [] };
           googletag.cmd.push(function () {
             googletag.defineSlot(adsKeys.display_001, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-1').addService(googletag.pubads());
-            googletag.pubads().enableSingleRequest();
             googletag.enableServices();
             googletag.display('global-ads-online-ads-wrap-1');
           });
@@ -106,7 +105,6 @@
             window.googletag = window.googletag || { cmd: [] };
             googletag.cmd.push(function () {
               googletag.defineSlot(adsKeys.display_003, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-2').addService(googletag.pubads());
-              googletag.pubads().enableSingleRequest();
               googletag.enableServices();
               googletag.display('global-ads-online-ads-wrap-2');
             });

@@ -194,39 +194,67 @@
                         }
                     }
 
+                    // Browsers block video-ad autoplay without a user gesture (black
+                    // screen). Reveal the rewarded ad on the visitor's first tap/keypress
+                    // on the page — no popup, the page stays fully interactive until then.
+                    var gestureDone = false;
+                    var pendingMakeVisible = null;
+
+                    function onFirstGesture() {
+                        if (gestureDone) return;
+                        gestureDone = true;
+                        ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
+                            document.removeEventListener(ev, onFirstGesture, true);
+                        });
+                        if (pendingMakeVisible) pendingMakeVisible();
+                    }
+
+                    ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
+                        document.addEventListener(ev, onFirstGesture, { capture: true, passive: true });
+                    });
+
                     googletag.pubads().addEventListener(
                         'rewardedSlotReady',
                         function (event) {
                             if (event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             // Fallback already ran (late ready event) → do NOT show a second ad.
                             if (rewardHandled) return;
-                            console.log('Rewarded ad ready — showing directly (no popup).');
+                            console.log('Rewarded ad ready — revealing on first user interaction (no popup).');
                             rewardHandled = true;
                             rewardReadyFired = true;
                             rewardVisible = true;
-                            event.makeRewardedVisible();
+
+                            var makeVisible = function () {
+                                event.makeRewardedVisible();
+                                // Watchdog: if the creative gets stuck (black screen — neither
+                                // rewardedSlotGranted nor rewardedSlotClosed ever fires),
+                                // destroy the slot and show the interstitial instead.
+                                stuckWatchdog = setTimeout(function () {
+                                    if (rewardDone || !rewardVisible) return;
+                                    console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
+                                    rewardDone = true;
+                                    // best-effort: hide the stuck rewarded overlay immediately
+                                    try {
+                                        var oop = document.getElementById(rewardedSlot.getSlotElementId());
+                                        if (oop) oop.style.setProperty('display', 'none', 'important');
+                                    } catch (e) { }
+                                    try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
+                                    rewardedSlot = null;
+                                    rewardHandled = false;    // allow the fallback to run
+                                    rewardReadyFired = false; // (guard checks both flags)
+                                    showInterstitialFallback();
+                                }, 15000);
+                            };
+
                             if (isInActive) {
                                 localStorage.setItem('inactiveRewardShown', 'true');
                             }
 
-                            // Watchdog: if the creative gets stuck (black screen — neither
-                            // rewardedSlotGranted nor rewardedSlotClosed ever fires),
-                            // destroy the slot and show the interstitial instead.
-                            stuckWatchdog = setTimeout(function () {
-                                if (rewardDone || !rewardVisible) return;
-                                console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
-                                rewardDone = true;
-                                // best-effort: hide the stuck rewarded overlay immediately
-                                try {
-                                    var oop = document.getElementById(rewardedSlot.getSlotElementId());
-                                    if (oop) oop.style.setProperty('display', 'none', 'important');
-                                } catch (e) { }
-                                try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
-                                rewardedSlot = null;
-                                rewardHandled = false;    // allow the fallback to run
-                                rewardReadyFired = false; // (guard checks both flags)
-                                showInterstitialFallback();
-                            }, 15000);
+                            if (gestureDone) {
+                                makeVisible();
+                            } else {
+                                pendingMakeVisible = makeVisible;
+                            }
                         }
                     );
 
