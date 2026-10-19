@@ -186,15 +186,17 @@
                         return !!(el && el.querySelector && el.querySelector('iframe'));
                     }
 
-                    /* ---------- TIER 3: display ladder, prepared OFF-SCREEN ---------- */
-                    // Measured on the live domain: financequizapp_display_002 and the
-                    // interstitial return NO FILL, while financequizapp_display_001 does
-                    // fill — so every display ad unit gets its own turn inside one hidden
-                    // wrapper. The overlay is revealed only for a slot that really rendered,
-                    // which is what keeps "at least one ad" and "never a blank page" both true.
+                    /* ---------- TIER 3: display ladder, in a REAL on-screen box ---------- */
+                    // Measured on the live domain with a controlled A/B test: the SAME slot
+                    // of financequizapp_display_002 answered isEmpty:true while its container
+                    // sat at left:-9999px (request went out as adxs=-9999) and answered
+                    // isEmpty:false with a real creative as soon as the container was moved
+                    // on-screen (adxs=10) — position was the only variable. Google simply
+                    // does not fill off-screen slots, which is why this tier never served.
+                    // financequizapp_display_003 is left out: it returned isEmpty:true even
+                    // while visible, so that unit has no inventory.
                     var DISPLAY_UNITS = [
                         window.adsKeys.display_002,
-                        window.adsKeys.display_003,
                         window.adsKeys.display_001
                     ];
                     var displayWrap = null;
@@ -207,8 +209,13 @@
                         if (displayWrap) return displayWrap;
                         displayWrap = document.createElement('div');
                         displayWrap.id = 'ad-fallback-wrap';
-                        // hidden off-screen while GAM decides whether it fills
-                        displayWrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:336px;min-height:280px;';
+                        // The slot MUST have real on-screen geometry while GAM decides
+                        // whether it fills: the old left:-9999px box was requested with
+                        // adxs=-9999, and Google answers such requests with "no fill"
+                        // every single time — that is why this tier never served.
+                        // It is transparent and click-through, so an empty box stays
+                        // invisible; only a slot that really filled gets promoted.
+                        displayWrap.style.cssText = 'position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:336px;min-height:280px;z-index:999997;pointer-events:none;';
                         document.body.appendChild(displayWrap);
                         return displayWrap;
                     }
@@ -284,14 +291,30 @@
                         if (isFilled(displaySlotId)) {
                             adShown = true;
                             escalated = true;
-                            console.log('Display ad filled → showing it.');
-                            displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;';
+                            console.log('Display ad filled → promoting it to a full-screen ad.');
+                            displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;pointer-events:auto;';
+                            addAdCloseButton(displayWrap);
                         } else {
                             console.log('Display ad has no fill → dropping the overlay (no blank page).');
                             discardDisplayAd();
                             refreshInPageBanners();
                             fillReport('display no-fill');
                         }
+                    }
+
+                    // A promoted display ad must be dismissable, otherwise the visitor is stuck.
+                    function addAdCloseButton(wrap) {
+                        if (wrap.querySelector('.ad-fallback-close')) return;
+                        var btn = document.createElement('div');
+                        btn.className = 'ad-fallback-close';
+                        btn.textContent = '\u2715';
+                        btn.title = 'Close ad';
+                        btn.style.cssText = 'position:absolute;top:14px;right:16px;width:34px;height:34px;line-height:32px;text-align:center;border:1px solid #fff;border-radius:50%;color:#fff;font-size:17px;cursor:pointer;background:rgba(0,0,0,.65);pointer-events:auto;font-family:Arial,sans-serif;';
+                        btn.addEventListener('click', function () {
+                            adShown = false;
+                            discardDisplayAd();
+                        });
+                        wrap.appendChild(btn);
                     }
 
                     /* ---------- TIER 2: interstitial (reuse the existing slot) ---------- */
