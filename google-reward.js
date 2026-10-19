@@ -164,6 +164,9 @@
 
                     var rewardHandled = false;
                     var rewardReadyFired = false;
+                    var rewardDone = false;
+                    var rewardVisible = false;
+                    var stuckWatchdog = null;
 
                     function showInterstitialFallback() {
                         if (rewardHandled || rewardReadyFired) return;
@@ -200,30 +203,56 @@
                             console.log('Rewarded ad ready — showing directly (no popup).');
                             rewardHandled = true;
                             rewardReadyFired = true;
+                            rewardVisible = true;
                             event.makeRewardedVisible();
                             if (isInActive) {
                                 localStorage.setItem('inactiveRewardShown', 'true');
                             }
+
+                            // Watchdog: if the creative gets stuck (black screen — neither
+                            // rewardedSlotGranted nor rewardedSlotClosed ever fires),
+                            // destroy the slot and show the interstitial instead.
+                            stuckWatchdog = setTimeout(function () {
+                                if (rewardDone || !rewardVisible) return;
+                                console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
+                                rewardDone = true;
+                                // best-effort: hide the stuck rewarded overlay immediately
+                                try {
+                                    var oop = document.getElementById(rewardedSlot.getSlotElementId());
+                                    if (oop) oop.style.setProperty('display', 'none', 'important');
+                                } catch (e) { }
+                                try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
+                                rewardedSlot = null;
+                                rewardHandled = false;    // allow the fallback to run
+                                rewardReadyFired = false; // (guard checks both flags)
+                                showInterstitialFallback();
+                            }, 15000);
                         }
                     );
 
                     googletag.pubads().addEventListener(
                         'rewardedSlotGranted',
-                        function () {
+                        function (event) {
+                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             console.log('Reward granted.');
+                            rewardDone = true;
+                            if (stuckWatchdog) clearTimeout(stuckWatchdog);
                         }
                     );
 
                     googletag.pubads().addEventListener(
                         'rewardedSlotClosed',
-                        function () {
+                        function (event) {
+                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             console.log('Rewarded ad closed.');
+                            rewardDone = true;
+                            if (stuckWatchdog) clearTimeout(stuckWatchdog);
                         }
                     );
 
                     // No rewarded ad inventory / load fail → no ready event fires,
                     // so show the interstitial after a timeout instead.
-                    setTimeout(showInterstitialFallback, 5000);
+                    setTimeout(showInterstitialFallback, 6000);
 
                     googletag.enableServices();
                     googletag.display(rewardedSlot);
