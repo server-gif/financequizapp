@@ -121,46 +121,38 @@
             if ((isActive || isInActive) && isRootOrIndexWithoutQuestionParam()) {
                 clearInterval(sessionChecker);
 
-                var shouldShow = false;
-
-                if (isInActive) {
-                    var inactiveShown = localStorage.getItem('inactiveRewardShown') === 'true' || localStorage.getItem('rewardShown') === 'true';
-                    if (!inactiveShown) {
-                        shouldShow = true;
-                    }
-                } else if (isActive) {
-                    var activeVisitCount = parseInt(localStorage.getItem('activeVisitCount') || '0', 10);
-                    activeVisitCount++;
-                    localStorage.setItem('activeVisitCount', activeVisitCount);
-
-                    if (activeVisitCount % 3 === 1) {
-                        shouldShow = true;
-                    }
-                }
-
-                if (!shouldShow) {
-                    return;
-                }
-
+                // Requirement: on every landing on the first page, show ONE ad —
+                // rewarded ad directly; if it fails to load, the interstitial takes
+                // its place. No popups, no visit gating.
                 console.log('Session state determined. Active:', isActive);
 
                 window.googletag = window.googletag || { cmd: [] };
 
-                // NOTE: ads-keys.js may already have called enableServices(); if so,
-                // this slot goes out in its own request triggered by display() below.
+                var iSlot = null;
+
+                function ensureInterstitialSlot() {
+                    if (typeof interstitialSlot !== 'undefined' && interstitialSlot) {
+                        return interstitialSlot;
+                    }
+                    if (!iSlot) {
+                        iSlot = googletag.defineOutOfPageSlot(
+                            window.adsKeys.interstitial_001,
+                            googletag.enums.OutOfPageFormat.INTERSTITIAL
+                        );
+                        if (iSlot) iSlot.addService(googletag.pubads());
+                    }
+                    return iSlot;
+                }
+
                 googletag.cmd.push(function () {
+                    // Make sure the interstitial slot exists from the very start,
+                    // so the fallback can always request it.
+                    ensureInterstitialSlot();
+
                     const rewardedSlot = googletag.defineOutOfPageSlot(
-                        window.adsKeys.rewoarded_001, // Replace with your GAM ad unit
+                        window.adsKeys.rewoarded_001, // GAM rewarded ad unit
                         googletag.enums.OutOfPageFormat.REWARDED
                     );
-
-                    if (!rewardedSlot) {
-                        console.log('Rewarded ads not supported on this device. Falling back to interstitial.');
-                        showInterstitialFallback();
-                        return;
-                    }
-
-                    rewardedSlot.addService(googletag.pubads());
 
                     var rewardHandled = false;
                     var rewardReadyFired = false;
@@ -173,45 +165,20 @@
                         rewardHandled = true;
                         console.log('Rewarded ad not loaded → showing interstitial.');
                         try {
-                            if (typeof interstitialSlot !== 'undefined' && interstitialSlot) {
-                                // re-request the out-of-page interstitial slot
-                                googletag.display(interstitialSlot);
-                            } else {
-                                window.googletag.cmd.push(function () {
-                                    var iSlot = googletag.defineOutOfPageSlot(
-                                        window.adsKeys.interstitial_001,
-                                        googletag.enums.OutOfPageFormat.INTERSTITIAL
-                                    );
-                                    if (iSlot) {
-                                        iSlot.addService(googletag.pubads());
-                                        googletag.enableServices();
-                                        googletag.display(iSlot);
-                                    }
-                                });
-                            }
+                            var slot = ensureInterstitialSlot();
+                            if (slot) googletag.display(slot);
                         } catch (e) {
                             console.warn('Interstitial fallback error:', e);
                         }
                     }
 
-                    // Browsers block video-ad autoplay without a user gesture (black
-                    // screen). Reveal the rewarded ad on the visitor's first tap/keypress
-                    // on the page — no popup, the page stays fully interactive until then.
-                    var gestureDone = false;
-                    var pendingMakeVisible = null;
-
-                    function onFirstGesture() {
-                        if (gestureDone) return;
-                        gestureDone = true;
-                        ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
-                            document.removeEventListener(ev, onFirstGesture, true);
-                        });
-                        if (pendingMakeVisible) pendingMakeVisible();
+                    if (!rewardedSlot) {
+                        console.log('Rewarded ads not supported on this device → interstitial.');
+                        showInterstitialFallback();
+                        return;
                     }
 
-                    ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
-                        document.addEventListener(ev, onFirstGesture, { capture: true, passive: true });
-                    });
+                    rewardedSlot.addService(googletag.pubads());
 
                     googletag.pubads().addEventListener(
                         'rewardedSlotReady',
@@ -219,42 +186,29 @@
                             if (event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
                             // Fallback already ran (late ready event) → do NOT show a second ad.
                             if (rewardHandled) return;
-                            console.log('Rewarded ad ready — revealing on first user interaction (no popup).');
+                            console.log('Rewarded ad ready — loading directly (no popup).');
                             rewardHandled = true;
                             rewardReadyFired = true;
                             rewardVisible = true;
+                            event.makeRewardedVisible();
 
-                            var makeVisible = function () {
-                                event.makeRewardedVisible();
-                                // Watchdog: if the creative gets stuck (black screen — neither
-                                // rewardedSlotGranted nor rewardedSlotClosed ever fires),
-                                // destroy the slot and show the interstitial instead.
-                                stuckWatchdog = setTimeout(function () {
-                                    if (rewardDone || !rewardVisible) return;
-                                    console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
-                                    rewardDone = true;
-                                    // best-effort: hide the stuck rewarded overlay immediately
-                                    try {
-                                        var oop = document.getElementById(rewardedSlot.getSlotElementId());
-                                        if (oop) oop.style.setProperty('display', 'none', 'important');
-                                    } catch (e) { }
-                                    try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
-                                    rewardedSlot = null;
-                                    rewardHandled = false;    // allow the fallback to run
-                                    rewardReadyFired = false; // (guard checks both flags)
-                                    showInterstitialFallback();
-                                }, 15000);
-                            };
-
-                            if (isInActive) {
-                                localStorage.setItem('inactiveRewardShown', 'true');
-                            }
-
-                            if (gestureDone) {
-                                makeVisible();
-                            } else {
-                                pendingMakeVisible = makeVisible;
-                            }
+                            // Watchdog: if the creative gets stuck (black screen — neither
+                            // rewardedSlotGranted nor rewardedSlotClosed ever fires),
+                            // destroy the slot and show the interstitial instead.
+                            stuckWatchdog = setTimeout(function () {
+                                if (rewardDone || !rewardVisible) return;
+                                console.log('Rewarded ad stuck (not completing) → destroying slot, showing interstitial.');
+                                rewardDone = true;
+                                // best-effort: hide the stuck rewarded overlay immediately
+                                try {
+                                    var oop = document.getElementById(rewardedSlot.getSlotElementId());
+                                    if (oop) oop.style.setProperty('display', 'none', 'important');
+                                } catch (e) { }
+                                try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
+                                rewardHandled = false;    // allow the fallback to run
+                                rewardReadyFired = false; // (guard checks both flags)
+                                showInterstitialFallback();
+                            }, 15000);
                         }
                     );
 
