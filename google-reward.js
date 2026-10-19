@@ -174,9 +174,16 @@
                     // slotId -> isEmpty, filled from real slotRenderEnded events.
                     // NOTE: this GPT build has no e.slotId — read it from the slot.
                     var renderInfo = {};
+                    var displayFilledHook = null;
                     pubads.addEventListener('slotRenderEnded', function (e) {
                         var id = e.slot ? e.slot.getSlotElementId() : e.slotId;
                         if (id) renderInfo[id] = e.isEmpty;
+                        // Reveal the fallback the instant it renders: while the wrapper is
+                        // transparent Google already counts the impression, so the invisible
+                        // window has to be as short as possible — not a fixed 4 s poll.
+                        if (id && id === displaySlotId && e.isEmpty === false && displayFilledHook) {
+                            try { displayFilledHook(); } catch (err) { }
+                        }
                     });
 
                     function isFilled(slotId) {
@@ -186,36 +193,37 @@
                         return !!(el && el.querySelector && el.querySelector('iframe'));
                     }
 
-                    /* ---------- TIER 3: display ladder, in a REAL on-screen box ---------- */
-                    // Measured on the live domain with a controlled A/B test: the SAME slot
-                    // of financequizapp_display_002 answered isEmpty:true while its container
-                    // sat at left:-9999px (request went out as adxs=-9999) and answered
-                    // isEmpty:false with a real creative as soon as the container was moved
-                    // on-screen (adxs=10) — position was the only variable. Google simply
-                    // does not fill off-screen slots, which is why this tier never served.
-                    // financequizapp_display_003 is left out: it returned isEmpty:true even
-                    // while visible, so that unit has no inventory.
+                    /* ---------- TIER 3: full-screen fallback (never a banner) ---------- */
+                    // Two measured facts shape this tier:
+                    //  1. Google refuses to fill a slot whose container is off-screen — the
+                    //     same display_002 slot went isEmpty:true at adxs=-9999 and
+                    //     isEmpty:false (real creative) once it had on-screen coordinates.
+                    //  2. A visible container makes the ad pop up as a banner and then
+                    //     "convert" into an interstitial, which looks broken.
+                    // So the wrapper IS the full-screen ad from the start, just fully
+                    // transparent and click-through until a creative really renders; only
+                    // then does it become visible. The visitor ever sees one thing: a
+                    // full-screen ad — never a banner in the page.
+                    // financequizapp_display_003 is not used (no inventory at all) and
+                    // display_001 is not used here either, because it is already the in-page
+                    // banner and Google answers the same creative twice.
                     var DISPLAY_UNITS = [
-                        window.adsKeys.display_002,
-                        window.adsKeys.display_001
+                        window.adsKeys.display_002
                     ];
                     var displayWrap = null;
                     var displaySlotId = null;
                     var displayIdx = -1;
                     var displayRun = false;
                     var displayWaitLeft = 6; // × 1.5 s grace while an interstitial is in flight
+                    var displayRevealed = false;
 
                     function ensureDisplayWrap() {
                         if (displayWrap) return displayWrap;
                         displayWrap = document.createElement('div');
                         displayWrap.id = 'ad-fallback-wrap';
-                        // The slot MUST have real on-screen geometry while GAM decides
-                        // whether it fills: the old left:-9999px box was requested with
-                        // adxs=-9999, and Google answers such requests with "no fill"
-                        // every single time — that is why this tier never served.
-                        // It is transparent and click-through, so an empty box stays
-                        // invisible; only a slot that really filled gets promoted.
-                        displayWrap.style.cssText = 'position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:336px;min-height:280px;z-index:999997;pointer-events:none;';
+                        // Real on-screen geometry (so GAM will fill it) but invisible and
+                        // click-through until a creative has actually rendered.
+                        displayWrap.style.cssText = 'position:fixed;inset:0;z-index:999998;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;';
                         document.body.appendChild(displayWrap);
                         return displayWrap;
                     }
@@ -241,6 +249,8 @@
 
                         var inner = document.createElement('div');
                         inner.id = 'global-ads-online-fallback-' + displayIdx;
+                        // the slot itself keeps a real size and sits centred in the wrapper
+                        inner.style.cssText = 'width:336px;min-height:280px;';
                         ensureDisplayWrap().appendChild(inner);
 
                         var slot = null;
@@ -258,11 +268,13 @@
                         } catch (e) { tryNextDisplayUnit(); return; }
 
                         setTimeout(checkCurrentDisplaySlot, 4000);
+                        displayFilledHook = checkCurrentDisplaySlot;
 
                         // A fill is only revealed once no interstitial request is still open,
                         // otherwise a filled interstitial and this overlay could BOTH appear.
                         function checkCurrentDisplaySlot() {
-                            if (adShown) { discardDisplayAd(); return; } // a higher tier won
+                            if (displayRevealed) return;                // already on screen
+                            if (adShown) { displayFilledHook = null; discardDisplayAd(); return; } // a higher tier won
                             if (interInFlight && displayWaitLeft-- > 0) {
                                 setTimeout(checkCurrentDisplaySlot, 1500);
                                 return;
@@ -272,6 +284,7 @@
                                 return;
                             }
                             console.log('  → ' + unit + ' had no fill, trying the next display unit.');
+                            displayFilledHook = null;
                             try { googletag.destroySlots([slot]); } catch (e) { }
                             if (inner.parentNode) inner.parentNode.removeChild(inner);
                             tryNextDisplayUnit();
@@ -287,12 +300,14 @@
 
                     // Reveal ONLY when a creative really rendered — otherwise stay hidden.
                     function revealDisplayAdIfFilled() {
-                        if (!displayWrap) return;
+                        if (!displayWrap || displayRevealed) return;
                         if (isFilled(displaySlotId)) {
+                            displayRevealed = true;
+                            displayFilledHook = null;
                             adShown = true;
                             escalated = true;
-                            console.log('Display ad filled → promoting it to a full-screen ad.');
-                            displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;pointer-events:auto;';
+                            console.log('Display ad filled → showing it as a full-screen ad.');
+                            displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;pointer-events:auto;opacity:1;';
                             addAdCloseButton(displayWrap);
                         } else {
                             console.log('Display ad has no fill → dropping the overlay (no blank page).');
