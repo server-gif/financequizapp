@@ -1,5 +1,27 @@
 (function () {
     var rewardEnabled = true;
+
+    // REWARD MODE:
+    //   'auto'   → default. Rewarded keeps first priority for real visitors, but is
+    //              skipped in environments known to break Google's video player
+    //              (embedded Electron preview browsers block the cross-origin media
+    //              fetch, so the ad "fills" but renders black). There we load the
+    //              INTERSTITIAL instead and never show a blank reward.
+    //   'always' → always attempt the rewarded ad first.
+    //   'never'  → never show a rewarded ad, interstitial only.
+    var rewardMode = 'auto';
+
+    function isBrokenVideoEnvironment() {
+        var ua = navigator.userAgent || '';
+        return /electron|headlesschrome/i.test(ua) && !/crios|edg\//i.test(ua);
+    }
+
+    function rewardShouldBeTried() {
+        if (rewardMode === 'never') return false;
+        if (rewardMode === 'always') return true;
+        return !isBrokenVideoEnvironment();
+    }
+
     var isRootOrIndexWithoutQuestionParam = () => {
         const { pathname, search } = window.location;
         const isCorrectPath =
@@ -259,9 +281,14 @@
                     function saveStrikes(n) { try { localStorage.setItem(STRIKE_KEY, String(n)); } catch (e) { } }
                     var brokenStrikes = 0;
                     try { brokenStrikes = parseInt(localStorage.getItem(STRIKE_KEY) || '0', 10) || 0; } catch (e) { }
-                    var skipReward = brokenStrikes >= 2;
+                    var skipReward = brokenStrikes >= 2 || !rewardShouldBeTried();
+                    var skipReason = rewardShouldBeTried()
+                        ? 'rewarded marked broken on recent visits'
+                        : 'this environment cannot play rewarded video';
 
-                    var rewardedSlot = googletag.defineOutOfPageSlot(
+                    // When skipping we don't even define/request the rewarded slot, so no
+                    // dead rewarded ad unit sits on the page.
+                    var rewardedSlot = skipReward ? null : googletag.defineOutOfPageSlot(
                         window.adsKeys.rewoarded_001, // GAM rewarded ad unit
                         googletag.enums.OutOfPageFormat.REWARDED
                     );
@@ -306,7 +333,7 @@
                                 saveStrikes(brokenStrikes + 1);
                                 hideReward();
                                 escalateNow('rewarded creative did not play');
-                            }, 45000);
+                            }, 20000);
                         };
                     })();
 
@@ -325,16 +352,15 @@
 
                     var revealEvent = null;
 
-                    if (!rewardedSlot) {
+                    if (skipReward) {
+                        // Reward can't play here → never show a blank screen, interstitial instead
+                        console.log('Rewarded skipped (' + skipReason + ') → loading interstitial.');
+                        googletag.enableServices();
+                        escalateNow(skipReason);
+                    } else if (!rewardedSlot) {
                         console.log('Rewarded format not supported on this device.');
                         googletag.enableServices();
                         escalateNow('rewarded unsupported');
-                    } else if (skipReward) {
-                        // reward broke black on recent visits → don't show a blank screen again
-                        console.log('Rewarded skipped after ' + brokenStrikes + ' broken plays → interstitial first.');
-                        googletag.enableServices();
-                        hideReward();
-                        escalateNow('rewarded marked broken');
                     } else {
                         rewardedSlot.addService(pubads);
 
