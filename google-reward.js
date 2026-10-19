@@ -21,6 +21,13 @@
     var rewardMode = 'never';
     var rewardOffReason = 'rewarded unit serves no playable video (would be a blank screen)';
 
+    // Testing without editing the file: append ?admode=always (or auto / never) to the
+    // page URL to override the setting above for that load.
+    try {
+        var modeParam = new URLSearchParams(window.location.search).get('admode');
+        if (modeParam === 'always' || modeParam === 'auto' || modeParam === 'never') rewardMode = modeParam;
+    } catch (e) { }
+
     function isBrokenVideoEnvironment() {
         var ua = navigator.userAgent || '';
         return /electron|headlesschrome/i.test(ua) && !/crios|edg\//i.test(ua);
@@ -179,31 +186,88 @@
                         return !!(el && el.querySelector && el.querySelector('iframe'));
                     }
 
-                    /* ---------- TIER 3: display ad prepared OFF-SCREEN ---------- */
+                    /* ---------- TIER 3: display ladder, prepared OFF-SCREEN ---------- */
+                    // Measured on the live domain: financequizapp_display_002 and the
+                    // interstitial return NO FILL, while financequizapp_display_001 does
+                    // fill — so every display ad unit gets its own turn inside one hidden
+                    // wrapper. The overlay is revealed only for a slot that really rendered,
+                    // which is what keeps "at least one ad" and "never a blank page" both true.
+                    var DISPLAY_UNITS = [
+                        window.adsKeys.display_002,
+                        window.adsKeys.display_003,
+                        window.adsKeys.display_001
+                    ];
                     var displayWrap = null;
                     var displaySlotId = null;
+                    var displayIdx = -1;
+                    var displayRun = false;
+                    var displayWaitLeft = 6; // × 1.5 s grace while an interstitial is in flight
 
-                    function prepareDisplayAd() {
+                    function ensureDisplayWrap() {
+                        if (displayWrap) return displayWrap;
                         displayWrap = document.createElement('div');
                         displayWrap.id = 'ad-fallback-wrap';
                         // hidden off-screen while GAM decides whether it fills
                         displayWrap.style.cssText = 'position:fixed;left:-9999px;top:0;width:336px;min-height:280px;';
-                        var inner = document.createElement('div');
-                        inner.id = 'global-ads-online-fallback-wrap';
-                        displayWrap.appendChild(inner);
                         document.body.appendChild(displayWrap);
-                        try {
-                            var s = googletag.defineSlot(
-                                window.adsKeys.display_002,
-                                [[336, 280], 'fluid', [300, 250]],
-                                'global-ads-online-fallback-wrap'
-                            );
-                            if (!s) { discardDisplayAd(); return; }
-                            s.addService(pubads);
-                            displaySlotId = s.getSlotElementId();
-                            googletag.display('global-ads-online-fallback-wrap');
-                        } catch (e) {
+                        return displayWrap;
+                    }
+
+                    function prepareDisplayAd() {
+                        if (displayRun) return;
+                        displayRun = true;
+                        tryNextDisplayUnit();
+                    }
+
+                    function tryNextDisplayUnit() {
+                        displayIdx++;
+                        if (displayIdx >= DISPLAY_UNITS.length) {
+                            console.log('No display ad unit filled → showing nothing (no blank page).');
                             discardDisplayAd();
+                            refreshInPageBanners();
+                            fillReport('display ladder exhausted');
+                            return;
+                        }
+                        var unit = DISPLAY_UNITS[displayIdx];
+                        if (!unit) { tryNextDisplayUnit(); return; }
+                        displayWaitLeft = 6; // fresh grace period per ad unit
+
+                        var inner = document.createElement('div');
+                        inner.id = 'global-ads-online-fallback-' + displayIdx;
+                        ensureDisplayWrap().appendChild(inner);
+
+                        var slot = null;
+                        try {
+                            slot = googletag.defineSlot(
+                                unit,
+                                [[336, 280], 'fluid', [300, 250]],
+                                inner.id
+                            );
+                            if (!slot) { tryNextDisplayUnit(); return; }
+                            slot.addService(pubads);
+                            displaySlotId = slot.getSlotElementId();
+                            googletag.display(inner.id);
+                            console.log('Display tier: requesting ' + unit);
+                        } catch (e) { tryNextDisplayUnit(); return; }
+
+                        setTimeout(checkCurrentDisplaySlot, 4000);
+
+                        // A fill is only revealed once no interstitial request is still open,
+                        // otherwise a filled interstitial and this overlay could BOTH appear.
+                        function checkCurrentDisplaySlot() {
+                            if (adShown) { discardDisplayAd(); return; } // a higher tier won
+                            if (interInFlight && displayWaitLeft-- > 0) {
+                                setTimeout(checkCurrentDisplaySlot, 1500);
+                                return;
+                            }
+                            if (isFilled(displaySlotId)) {
+                                revealDisplayAdIfFilled();
+                                return;
+                            }
+                            console.log('  → ' + unit + ' had no fill, trying the next display unit.');
+                            try { googletag.destroySlots([slot]); } catch (e) { }
+                            if (inner.parentNode) inner.parentNode.removeChild(inner);
+                            tryNextDisplayUnit();
                         }
                     }
 
@@ -223,8 +287,10 @@
                             console.log('Display ad filled → showing it.');
                             displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;';
                         } else {
-                            console.log('Display ad has no fill → showing nothing (no blank page).');
+                            console.log('Display ad has no fill → dropping the overlay (no blank page).');
                             discardDisplayAd();
+                            refreshInPageBanners();
+                            fillReport('display no-fill');
                         }
                     }
 
@@ -264,15 +330,28 @@
                         }
                     }
 
-                    /* ---------- ESCALATE: fresh interstitial, then display ad ---------- */
+                    /* ---------- ESCALATE: interstitial (up to 2 tries), then display ---------- */
                     // GPT ignores display()/refresh() on an already-requested out-of-page
-                    // slot, so a real re-request needs destroy + redefine + display.
+                    // slot, so a real re-request needs destroy + redefine + display. A single
+                    // no-fill is often transient, so the interstitial gets a second attempt
+                    // and the in-page banners get a refresh — the goal is that at least one
+                    // ad unit really renders.
                     var escalated = false;
+                    var interAttempts = 0;
+                    var interInFlight = false;
+                    var MAX_INTER_ATTEMPTS = 2;
 
                     function escalateNow(reason) {
                         if (escalated) return;
                         escalated = true;
-                        console.log('Escalating (' + reason + ') → interstitial.');
+                        tryInterstitial(reason);
+                    }
+
+                    function tryInterstitial(reason) {
+                        if (interAttempts >= MAX_INTER_ATTEMPTS) { interInFlight = false; tryDisplayOrBail(); return; }
+                        interAttempts++;
+                        interInFlight = true;
+                        console.log('Interstitial attempt ' + interAttempts + ' (' + reason + ').');
                         // Free the interstitial format FIRST — destroying only our own handle
                         // leaves a duplicate registration behind, and GPT then refuses the
                         // fresh slot ("Format already created") so no ad is requested at all.
@@ -288,14 +367,62 @@
                             window.adsKeys.interstitial_001,
                             googletag.enums.OutOfPageFormat.INTERSTITIAL
                         );
-                        if (!fresh) { revealDisplayAdIfFilled(); return; }
+                        if (!fresh) { interInFlight = false; tryDisplayOrBail(); return; }
                         interSlot = fresh;
                         fresh.addService(pubads);
                         var fid = fresh.getSlotElementId();
                         googletag.display(fresh);
                         setTimeout(function () {
-                            if (!isFilled(fid)) revealDisplayAdIfFilled();
+                            interInFlight = false;
+                            if (isFilled(fid)) {
+                                adShown = true;
+                                console.log('Interstitial filled → GPT is showing it.');
+                                fillReport('interstitial filled');
+                                return;
+                            }
+                            console.log('Interstitial attempt ' + interAttempts + ' → NO FILL.');
+                            if (interAttempts < MAX_INTER_ATTEMPTS) tryInterstitial('previous attempt had no fill');
+                            else tryDisplayOrBail();
                         }, 4000);
+                    }
+
+                    // Interstitial gave up → run the display ladder (each unit one chance).
+                    function tryDisplayOrBail() {
+                        prepareDisplayAd();
+                    }
+
+                    /* ---------- DIAGNOSTICS: which ad unit filled and which did not ---------- */
+                    function fillReport(tag) {
+                        try {
+                            var rows = (pubads.getSlots() || []).map(function (s) {
+                                var id = s.getSlotElementId();
+                                var info = renderInfo[id];
+                                var state;
+                                if (info === false) state = 'FILLED';
+                                else if (info === true) state = 'NO FILL (empty)';
+                                else state = isFilled(id) ? 'FILLED (no render event)' : 'not rendered';
+                                return { adUnit: s.getAdUnitPath(), slot: id, fill: state };
+                            });
+                            console.log('=== AD FILL REPORT (' + tag + ') ===');
+                            rows.forEach(function (r) { console.log('  ' + r.fill.padEnd(22) + r.adUnit); });
+                            return rows;
+                        } catch (e) { return []; }
+                    }
+
+                    // Nothing overlay-able filled: at least make sure the normal in-page
+                    // banners get one more request, so the visitor sees a real ad.
+                    function refreshInPageBanners() {
+                        var paths = [window.adsKeys.display_001, window.adsKeys.display_003];
+                        var targets = [];
+                        try {
+                            targets = (pubads.getSlots() || []).filter(function (s) {
+                                return paths.indexOf(s.getAdUnitPath()) !== -1 && !isFilled(s.getSlotElementId());
+                            });
+                        } catch (e) { }
+                        if (!targets.length) { fillReport('nothing to refresh'); return; }
+                        console.log('Refreshing ' + targets.length + ' in-page banner slot(s) so at least one ad renders.');
+                        try { pubads.refresh(targets); } catch (e) { }
+                        setTimeout(function () { fillReport('after banner refresh'); }, 4000);
                     }
 
                     /* ---------- TIER 1: rewarded ---------- */
