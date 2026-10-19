@@ -41,6 +41,14 @@
           googletag.cmd.push(function () {
             googletag.defineSlot(adsKeys.display_001, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-ads-wrap-1').addService(googletag.pubads());
             // singleRequest is configured ONCE in ads-keys.js via googletag.setConfig
+            // no fill → hide the empty block + its "Advertisement" label (no blank area)
+            googletag.pubads().addEventListener('slotRenderEnded', function (e) {
+              if (e.slotId === 'global-ads-online-ads-wrap-1' && e.isEmpty) {
+                var w = document.getElementById('global-ads-online-ads-wrap-1');
+                var b = w && w.closest ? w.closest('.tops-ads') : null;
+                if (b) b.style.display = 'none';
+              }
+            });
             googletag.enableServices();
             googletag.display('global-ads-online-ads-wrap-1');
           });
