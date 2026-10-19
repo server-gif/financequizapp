@@ -129,22 +129,51 @@
                 window.googletag = window.googletag || { cmd: [] };
 
                 var iSlot = null;
+                var renderInfo = {}; // slotId -> isEmpty (from slotRenderEnded)
 
                 function ensureInterstitialSlot() {
+                    if (iSlot) return iSlot;
                     if (typeof interstitialSlot !== 'undefined' && interstitialSlot) {
                         return interstitialSlot;
                     }
-                    if (!iSlot) {
-                        iSlot = googletag.defineOutOfPageSlot(
-                            window.adsKeys.interstitial_001,
-                            googletag.enums.OutOfPageFormat.INTERSTITIAL
-                        );
-                        if (iSlot) iSlot.addService(googletag.pubads());
+                    iSlot = googletag.defineOutOfPageSlot(
+                        window.adsKeys.interstitial_001,
+                        googletag.enums.OutOfPageFormat.INTERSTITIAL
+                    );
+                    if (iSlot) iSlot.addService(googletag.pubads());
+                    return iSlot;
+                }
+
+                // A fresh interstitial request: GPT ignores refresh()/display() on an
+                // already-requested out-of-page slot, so destroy + redefine + display.
+                // onEmpty() is called when no creative came back (escalate to next tier).
+                function requestFreshInterstitial(onEmpty) {
+                    var cur = ensureInterstitialSlot();
+                    if (cur) {
+                        try { googletag.destroySlots([cur]); } catch (e) { }
                     }
+                    iSlot = googletag.defineOutOfPageSlot(
+                        window.adsKeys.interstitial_001,
+                        googletag.enums.OutOfPageFormat.INTERSTITIAL
+                    );
+                    if (!iSlot) return null;
+                    iSlot.addService(googletag.pubads());
+                    var id = iSlot.getSlotElementId();
+                    googletag.display(iSlot);
+                    setTimeout(function () {
+                        // renderInfo[id] === false → a real creative came back
+                        if (renderInfo[id] === false) return;
+                        if (typeof onEmpty === 'function') onEmpty();
+                    }, 4000);
                     return iSlot;
                 }
 
                 googletag.cmd.push(function () {
+                    // Track which slots actually received a creative (isEmpty flag).
+                    googletag.pubads().addEventListener('slotRenderEnded', function (e) {
+                        renderInfo[e.slotId] = e.isEmpty;
+                    });
+
                     // Make sure the interstitial slot exists from the very start,
                     // so the fallback can always request it.
                     ensureInterstitialSlot();
@@ -154,21 +183,65 @@
                         googletag.enums.OutOfPageFormat.REWARDED
                     );
 
-                    var rewardHandled = false;
+                    var rewardHandled = false; // reward ad ne show kari (late events block kare)
                     var rewardReadyFired = false;
+                    var fallbackRan = false;   // interstitial/display fallback ek j vaar chale
                     var rewardDone = false;
                     var rewardVisible = false;
                     var stuckWatchdog = null;
+                    var lastAdShown = false;   // display overlay ek vaar j banay
+
+                    // Last-resort full-screen display ad (fillable inventory), so at
+                    // least one ad always appears even when reward + interstitial fail.
+                    function showDisplayAdOverlay() {
+                        if (lastAdShown) return;
+                        lastAdShown = true;
+                        console.log('Interstitial did not render → showing display ad overlay.');
+                        if (document.getElementById('ad-fallback-overlay')) return;
+                        var box = document.createElement('div');
+                        box.id = 'ad-fallback-overlay';
+                        box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;';
+                        var inner = document.createElement('div');
+                        inner.id = 'global-ads-online-fallback-wrap';
+                        inner.style.cssText = 'background:#fff;min-width:300px;min-height:50px;border-radius:8px;';
+                        var closeBtn = document.createElement('button');
+                        closeBtn.textContent = '✖';
+                        closeBtn.style.cssText = 'position:absolute;top:10px;right:12px;background:#2563eb;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:16px;cursor:pointer;';
+                        closeBtn.onclick = function () {
+                            if (box.parentNode) box.parentNode.removeChild(box);
+                        };
+                        box.appendChild(closeBtn);
+                        box.appendChild(inner);
+                        document.body.appendChild(box);
+                        try {
+                            var fSlot = googletag.defineSlot(window.adsKeys.display_002, [[336, 280], 'fluid', [300, 250]], 'global-ads-online-fallback-wrap');
+                            if (!fSlot) return;
+                            fSlot.addService(googletag.pubads());
+                            googletag.display('global-ads-online-fallback-wrap');
+                            var fId = fSlot.getSlotElementId();
+                            // If GAM returns no fill for the overlay slot too, remove the
+                            // empty box (checked via renderInfo AND a real iframe probe).
+                            setTimeout(function () {
+                                var filled = renderInfo[fId] === false ||
+                                    (inner.querySelector && inner.querySelector('iframe'));
+                                if (!filled && box.parentNode) box.parentNode.removeChild(box);
+                            }, 3500);
+                        } catch (e) {
+                            console.warn('Display ad overlay fallback failed:', e);
+                        }
+                    }
 
                     function showInterstitialFallback() {
-                        if (rewardHandled || rewardReadyFired) return;
-                        rewardHandled = true;
+                        if (rewardHandled || fallbackRan) return;
+                        fallbackRan = true;
                         console.log('Rewarded ad not loaded → showing interstitial.');
                         try {
-                            var slot = ensureInterstitialSlot();
-                            if (slot) googletag.display(slot);
+                            if (!requestFreshInterstitial(showDisplayAdOverlay)) {
+                                showDisplayAdOverlay();
+                            }
                         } catch (e) {
                             console.warn('Interstitial fallback error:', e);
+                            showDisplayAdOverlay();
                         }
                     }
 
@@ -205,8 +278,9 @@
                                     if (oop) oop.style.setProperty('display', 'none', 'important');
                                 } catch (e) { }
                                 try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
-                                rewardHandled = false;    // allow the fallback to run
-                                rewardReadyFired = false; // (guard checks both flags)
+                                rewardHandled = false;    // reward no show fail mani late
+                                rewardReadyFired = false; // events ignore thai jashe
+                                fallbackRan = false;
                                 showInterstitialFallback();
                             }, 6000);
                         }
