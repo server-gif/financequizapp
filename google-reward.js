@@ -146,6 +146,8 @@
 
                 window.googletag = window.googletag || { cmd: [] };
 
+                // NOTE: ads-keys.js may already have called enableServices(); if so,
+                // this slot goes out in its own request triggered by display() below.
                 googletag.cmd.push(function () {
                     const rewardedSlot = googletag.defineOutOfPageSlot(
                         window.adsKeys.rewoarded_001, // Replace with your GAM ad unit
@@ -153,23 +155,54 @@
                     );
 
                     if (!rewardedSlot) {
-                        console.log('Rewarded ads not supported on this device.');
+                        console.log('Rewarded ads not supported on this device. Falling back to interstitial.');
+                        showInterstitialFallback();
                         return;
                     }
 
                     rewardedSlot.addService(googletag.pubads());
 
+                    var rewardHandled = false;
+                    var rewardReadyFired = false;
+
+                    function showInterstitialFallback() {
+                        if (rewardHandled || rewardReadyFired) return;
+                        rewardHandled = true;
+                        console.log('Rewarded ad not loaded → showing interstitial.');
+                        try {
+                            if (typeof interstitialSlot !== 'undefined' && interstitialSlot) {
+                                // re-request the out-of-page interstitial slot
+                                googletag.display(interstitialSlot);
+                            } else {
+                                window.googletag.cmd.push(function () {
+                                    var iSlot = googletag.defineOutOfPageSlot(
+                                        window.adsKeys.interstitial_001,
+                                        googletag.enums.OutOfPageFormat.INTERSTITIAL
+                                    );
+                                    if (iSlot) {
+                                        iSlot.addService(googletag.pubads());
+                                        googletag.enableServices();
+                                        googletag.display(iSlot);
+                                    }
+                                });
+                            }
+                        } catch (e) {
+                            console.warn('Interstitial fallback error:', e);
+                        }
+                    }
+
                     googletag.pubads().addEventListener(
                         'rewardedSlotReady',
                         function (event) {
-                            console.log('Rewarded ad ready.');
+                            if (event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
+                            // Fallback already ran (late ready event) → do NOT show a second ad.
+                            if (rewardHandled) return;
+                            console.log('Rewarded ad ready — showing directly (no popup).');
+                            rewardHandled = true;
+                            rewardReadyFired = true;
+                            event.makeRewardedVisible();
                             if (isInActive) {
-                                createRewardPopup(function () {
-                                    event.makeRewardedVisible();
-                                    localStorage.setItem('inactiveRewardShown', 'true');
-                                });
-                            } else {
-                                event.makeRewardedVisible();
+                                localStorage.setItem('inactiveRewardShown', 'true');
                             }
                         }
                     );
@@ -187,6 +220,10 @@
                             console.log('Rewarded ad closed.');
                         }
                     );
+
+                    // No rewarded ad inventory / load fail → no ready event fires,
+                    // so show the interstitial after a timeout instead.
+                    setTimeout(showInterstitialFallback, 5000);
 
                     googletag.enableServices();
                     googletag.display(rewardedSlot);
