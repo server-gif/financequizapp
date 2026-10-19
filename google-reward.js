@@ -1,15 +1,25 @@
 (function () {
     var rewardEnabled = true;
 
-    // REWARD MODE:
-    //   'auto'   → default. Rewarded keeps first priority for real visitors, but is
-    //              skipped in environments known to break Google's video player
-    //              (embedded Electron preview browsers block the cross-origin media
-    //              fetch, so the ad "fills" but renders black). There we load the
-    //              INTERSTITIAL instead and never show a blank reward.
+    // REWARD MODE — which ad gets shown first.
+    //   'never'  → NEVER display a rewarded ad; the interstitial is loaded instead.
+    //   'auto'   → rewarded first for real browsers, skipped in environments that
+    //              cannot play Google's video player (embedded Electron previews).
     //   'always' → always attempt the rewarded ad first.
-    //   'never'  → never show a rewarded ad, interstitial only.
-    var rewardMode = 'auto';
+    //
+    // WHY 'never' IS THE DEFAULT: the GAM rewarded unit
+    // /23338698373/financequizapp_rewarded_001 "fills" but its creative delivers no
+    // media file at all — measured in a real (non-Electron) Chrome: IMA telemetry
+    // vsrc=none / vs=1x1 / "The element has no supported sources.", the video source
+    // request dies with net::ERR_BLOCKED_BY_ORB, and not a single .mp4/.webm/
+    // googlevideo segment is ever fetched. GPT still fires rewardedSlotReady, so the
+    // only thing a visitor sees is a full-screen BLACK player. No page-side check can
+    // detect that (the creative lives in a cross-origin Safeframe, mediaSession and
+    // canPlayType are both useless), so the only way to guarantee "no blank page" is
+    // to not display it. Flip this back to 'auto' as soon as a working VAST video
+    // creative is attached to that ad unit in GAM.
+    var rewardMode = 'never';
+    var rewardOffReason = 'rewarded unit serves no playable video (would be a blank screen)';
 
     function isBrokenVideoEnvironment() {
         var ua = navigator.userAgent || '';
@@ -219,14 +229,22 @@
                     }
 
                     /* ---------- TIER 2: interstitial (reuse the existing slot) ---------- */
-                    // ads-keys.js already defines + requests an out-of-page interstitial
-                    // at page load. Defining a second one makes GPT reject it with
-                    // "Format already created on the page", so reuse it when present.
-                    var interSlot = null;
+                    // GPT allows only ONE out-of-page interstitial per page: a second one is
+                    // silently dropped with "Format already created on the page" and is then
+                    // never requested — which is exactly why the interstitial did not appear.
+                    // The slot is looked up in GPT's own slot list rather than trusting the
+                    // ads-keys.js variable, because async script order is not guaranteed.
+                    function findInterstitialSlot() {
+                        var slots = pubads.getSlots() || [], found = null;
+                        for (var i = 0; i < slots.length; i++) {
+                            if (slots[i].getAdUnitPath() === window.adsKeys.interstitial_001) found = slots[i];
+                        }
+                        return found;
+                    }
+
+                    var interSlot = findInterstitialSlot();
                     var interSlotIsNew = false;
-                    if (typeof interstitialSlot !== 'undefined' && interstitialSlot) {
-                        interSlot = interstitialSlot;
-                    } else {
+                    if (!interSlot) {
                         interSlot = googletag.defineOutOfPageSlot(
                             window.adsKeys.interstitial_001,
                             googletag.enums.OutOfPageFormat.INTERSTITIAL
@@ -255,10 +273,17 @@
                         if (escalated) return;
                         escalated = true;
                         console.log('Escalating (' + reason + ') → interstitial.');
-                        if (interSlot) {
-                            try { googletag.destroySlots([interSlot]); } catch (e) { }
-                            interSlot = null;
-                        }
+                        // Free the interstitial format FIRST — destroying only our own handle
+                        // leaves a duplicate registration behind, and GPT then refuses the
+                        // fresh slot ("Format already created") so no ad is requested at all.
+                        var stale = [];
+                        try {
+                            stale = (pubads.getSlots() || []).filter(function (s) {
+                                return s.getAdUnitPath() === window.adsKeys.interstitial_001;
+                            });
+                        } catch (e) { }
+                        if (stale.length) { try { googletag.destroySlots(stale); } catch (e) { } }
+                        interSlot = null;
                         var fresh = googletag.defineOutOfPageSlot(
                             window.adsKeys.interstitial_001,
                             googletag.enums.OutOfPageFormat.INTERSTITIAL
@@ -284,7 +309,7 @@
                     var skipReward = brokenStrikes >= 2 || !rewardShouldBeTried();
                     var skipReason = rewardShouldBeTried()
                         ? 'rewarded marked broken on recent visits'
-                        : 'this environment cannot play rewarded video';
+                        : (rewardMode === 'never' ? rewardOffReason : 'this environment cannot play rewarded video');
 
                     // When skipping we don't even define/request the rewarded slot, so no
                     // dead rewarded ad unit sits on the page.
