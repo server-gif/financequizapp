@@ -1,31 +1,50 @@
 (function () {
     var rewardEnabled = true;
 
-    // REWARD MODE — which ad gets shown first.
-    //   'never'  → NEVER display a rewarded ad; the interstitial is loaded instead.
-    //   'auto'   → rewarded first for real browsers, skipped in environments that
-    //              cannot play Google's video player (embedded Electron previews).
-    //   'always' → always attempt the rewarded ad first.
-    //
-    // WHY 'never' IS THE DEFAULT: the GAM rewarded unit
-    // /23338698373/financequizapp_rewarded_001 "fills" but its creative delivers no
-    // media file at all — measured in a real (non-Electron) Chrome: IMA telemetry
-    // vsrc=none / vs=1x1 / "The element has no supported sources.", the video source
-    // request dies with net::ERR_BLOCKED_BY_ORB, and not a single .mp4/.webm/
-    // googlevideo segment is ever fetched. GPT still fires rewardedSlotReady, so the
-    // only thing a visitor sees is a full-screen BLACK player. No page-side check can
-    // detect that (the creative lives in a cross-origin Safeframe, mediaSession and
-    // canPlayType are both useless), so the only way to guarantee "no blank page" is
-    // to not display it. Flip this back to 'auto' as soon as a working VAST video
-    // creative is attached to that ad unit in GAM.
-    var rewardMode = 'never';
-    var rewardOffReason = 'rewarded unit serves no playable video (would be a blank screen)';
+    /* ================= AD FLOW CONFIGURATION ================= */
+    // Rewarded is ALWAYS tried first, every page view. The previous version of this
+    // file defaulted to rewardMode = 'never' and remembered "broken" visits in
+    // localStorage (fqRewardBrokenStrikes), permanently skipping the rewarded tier
+    // after two bad loads. Both of those are gone: nothing persisted can switch the
+    // rewarded request off, so the flow really does start from a rewarded request
+    // and only falls back when THIS view's request fails or times out.
+    var AD_CONFIG = {
+        // Wait this long for rewardedSlotReady before calling rewarded failed.
+        rewardReadyTimeoutMs: 12000,
+        // rewardedSlotReady fired: reveal after this grace period if the visitor
+        // has not touched the page yet (Google's player autoplays inside a gesture).
+        rewardRevealGraceMs: 2500,
+        // Visible but the creative never plays out (a fill with no media file shows
+        // as a full-screen black player) → tear it down after this long.
+        rewardPlayGuardMs: 20000,
+        // Wait this long for the interstitial's own render verdict.
+        interstitialTimeoutMs: 8000,
+        // Platform/consent eligibility only — never a memory of past failures.
+        // Google's rewarded player cannot run in embedded Electron/HEADLESS previews.
+        allowRewarded: true,
+        // ?admode=always — try the rewarded tier even in a preview environment that
+        // is normally excluded, so the rewarded path can be tested from an embedded
+        // Electron browser without editing this file.
+        forceRewarded: false
+    };
 
-    // Testing without editing the file: append ?admode=always (or auto / never) to the
-    // page URL to override the setting above for that load.
+    // Tune or disable per load without editing this file:
+    //   ?rttl=8000      rewarded ready-timeout (ms)
+    //   ?ittl=6000      interstitial verdict-timeout (ms)
+    //   ?admode=never   skip the rewarded tier (platform check only, no ad is
+    //                   "remembered" as broken)
+    //   ?admode=always  force the rewarded tier even in an excluded environment
     try {
-        var modeParam = new URLSearchParams(window.location.search).get('admode');
-        if (modeParam === 'always' || modeParam === 'auto' || modeParam === 'never') rewardMode = modeParam;
+        var cfgQs = new URLSearchParams(window.location.search);
+        var cfgNum = function (key, target) {
+            var v = parseInt(cfgQs.get(key), 10);
+            if (v > 0) AD_CONFIG[target] = v;
+        };
+        cfgNum('rttl', 'rewardReadyTimeoutMs');
+        cfgNum('ittl', 'interstitialTimeoutMs');
+        var modeParam = cfgQs.get('admode');
+        if (modeParam === 'never') AD_CONFIG.allowRewarded = false;
+        if (modeParam === 'always') AD_CONFIG.forceRewarded = true;
     } catch (e) { }
 
     // FULL-SCREEN FORMATS ONLY. The ad shown over the first page is either a REWARDED
@@ -49,10 +68,17 @@
         return /electron|headlesschrome/i.test(ua) && !/crios|edg\//i.test(ua);
     }
 
+    // Only real platform limits can stop the rewarded tier.
     function rewardShouldBeTried() {
-        if (rewardMode === 'never') return false;
-        if (rewardMode === 'always') return true;
-        return !isBrokenVideoEnvironment();
+        return AD_CONFIG.allowRewarded &&
+            (AD_CONFIG.forceRewarded || !isBrokenVideoEnvironment());
+    }
+
+    // Why the rewarded tier is not requestable, for honest logging.
+    function rewardBlockReason() {
+        if (!AD_CONFIG.allowRewarded) return 'rewarded tier disabled for this load (?admode=never)';
+        if (isBrokenVideoEnvironment()) return 'this environment cannot play Google\'s rewarded video player (override with ?admode=always)';
+        return '';
     }
 
     var isRootOrIndexWithoutQuestionParam = () => {
@@ -187,6 +213,47 @@
                 googletag.cmd.push(function () {
                     var pubads = googletag.pubads();
 
+                    /* ================= AD STATE MACHINE ================= */
+                    // One variable decides everything, so a late Google callback can never
+                    // put a second ad on screen. Legal paths:
+                    //   idle
+                    //    → reward_loading → reward_ready → reward_showing → finished
+                    //                ↓ (no fill / timeout / unsupported / never played out)
+                    //          reward_failed → interstitial_loading → interstitial_showing → finished
+                    //                                          ↓ no fill
+                    //                                        finished (nothing shown)
+                    var S = {
+                        IDLE: 'idle',
+                        REWARD_LOADING: 'reward_loading',
+                        REWARD_READY: 'reward_ready',
+                        REWARD_SHOWING: 'reward_showing',
+                        REWARD_FAILED: 'reward_failed',
+                        INTER_LOADING: 'interstitial_loading',
+                        INTER_SHOWING: 'interstitial_showing',
+                        FINISHED: 'finished'
+                    };
+                    var state = S.IDLE;
+                    // Set by whichever tier actually got on screen (the banner overlay uses
+                    // it too), so "an ad is already up" has exactly one meaning.
+                    var fullScreenShown = false;
+
+                    function go(next, why) {
+                        state = next;
+                        // Read-only diagnostic for testing: type window.__adLastState in the
+                        // console to see where the flow ended.
+                        try { window.__adLastState = next; } catch (e) { }
+                        console.log('AD STATE → ' + next + (why ? '  [' + why + ']' : ''));
+                    }
+
+                    // True as soon as a full-screen ad is up or the flow is over: no tier may
+                    // start, nothing may be revealed by a late event.
+                    function adTaken() {
+                        return fullScreenShown ||
+                            state === S.REWARD_SHOWING ||
+                            state === S.INTER_SHOWING ||
+                            state === S.FINISHED;
+                    }
+
                     // slotId -> isEmpty, filled from real slotRenderEnded events.
                     // NOTE: this GPT build has no e.slotId — read it from the slot.
                     var renderInfo = {};
@@ -207,6 +274,37 @@
                         if (renderInfo[slotId] === false) return true;
                         var el = document.getElementById(slotId);
                         return !!(el && el.querySelector && el.querySelector('iframe'));
+                    }
+
+                    // 'NO FILL' may only ever be reported for a slot Google actually
+                    // answered. A request that was never sent is a different problem, and
+                    // labelling it a no-fill made dead ad units look like Google refusals.
+                    function answerOf(id) {
+                        if (!id) return 'NOT REQUESTED (no slot)';
+                        if (renderInfo[id] === false) return 'FILLED';
+                        if (renderInfo[id] === true) return 'NO FILL — Google answered empty';
+                        return 'NOT ANSWERED (no slotRenderEnded for it)';
+                    }
+
+                    // Every async verdict is read through this one helper, so no tier can
+                    // wait forever and no verdict is read before Google had a chance to
+                    // answer. test() returns null while pending, a value once known.
+                    function pollUntil(test, timeoutMs, onResult) {
+                        var waited = 0, step = 500, settled = false;
+                        function finish(val) {
+                            if (settled) return;
+                            settled = true;
+                            onResult(val);
+                        }
+                        (function tick() {
+                            if (settled) return;
+                            var v = null;
+                            try { v = test(); } catch (e) { v = null; }
+                            if (v !== null && v !== undefined) { finish(v); return; }
+                            waited += step;
+                            if (waited >= timeoutMs) { finish(null); return; }
+                            setTimeout(tick, step);
+                        })();
                     }
 
                     /* ---------- TIER 3: display fallback — DISABLED by default ---------- */
@@ -290,8 +388,15 @@
                         // otherwise a filled interstitial and this overlay could BOTH appear.
                         function checkCurrentDisplaySlot() {
                             if (displayRevealed) return;                // already on screen
-                            if (adShown) { displayFilledHook = null; discardDisplayAd(); return; } // a higher tier won
-                            if (interInFlight && displayWaitLeft-- > 0) {
+                            if (adTaken()) {
+                                // Do not vanish silently: this tier was requested and Google
+                                // answered, so its verdict has to reach the console.
+                                displayFilledHook = null;
+                                if (!displayRevealed) console.log('Display tier (' + unit + '): ' + answerOf(displaySlotId) + ' — another ad already took the screen, overlay discarded.');
+                                discardDisplayAd();
+                                return;
+                            }
+                            if (interPending && displayWaitLeft-- > 0) {
                                 setTimeout(checkCurrentDisplaySlot, 1500);
                                 return;
                             }
@@ -320,8 +425,7 @@
                         if (isFilled(displaySlotId)) {
                             displayRevealed = true;
                             displayFilledHook = null;
-                            adShown = true;
-                            escalated = true;
+                            fullScreenShown = true;
                             console.log('Display ad filled → showing it as a full-screen ad.');
                             displayWrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999998;display:flex;align-items:center;justify-content:center;pointer-events:auto;opacity:1;';
                             addAdCloseButton(displayWrap);
@@ -342,7 +446,7 @@
                         btn.title = 'Close ad';
                         btn.style.cssText = 'position:absolute;top:14px;right:16px;width:34px;height:34px;line-height:32px;text-align:center;border:1px solid #fff;border-radius:50%;color:#fff;font-size:17px;cursor:pointer;background:rgba(0,0,0,.65);pointer-events:auto;font-family:Arial,sans-serif;';
                         btn.addEventListener('click', function () {
-                            adShown = false;
+                            fullScreenShown = false;
                             discardDisplayAd();
                         });
                         wrap.appendChild(btn);
@@ -439,164 +543,114 @@
                         return found;
                     }
 
-                    function armPageLevelInterstitial(left) {
-                        if (triggersArmed) return;
-                        var slot = findPageLevelInterstitialSlot();
-                        if (slot) { armInterstitialTriggers(slot); return; }
-                        if (left > 0) setTimeout(function () { armPageLevelInterstitial(left - 1); }, 1500);
-                        else console.log('No Google page-level interstitial slot was created on this page.');
+                    // Nothing is registered or requested here. The interstitial tier only
+                    // starts once the rewarded tier has really failed (startInterstitial),
+                    // so there is exactly one moment when the format is touched.
+                    // Diagnostic: report what Google's own page-level interstitial decides.
+                    pubads.addEventListener('slotRenderEnded', function (e) {
+                        var path = e.slot ? e.slot.getAdUnitPath() : '';
+                        if (!path || path.indexOf('/Latest') === -1) return;
+                        console.log('Page-level interstitial ' + path + ': ' + (e.isEmpty
+                            ? 'NO FILL (Google answered empty)'
+                            : 'FILLED → GPT shows it on an eligible user action (link click or an armed trigger).'));
+                    });
+
+                    /* ---------- TIER 2: interstitial (the rewarded fallback) ---------- */
+                    // GPT allows exactly ONE out-of-page interstitial per page, so this tier
+                    // never destroys + redefines slots to "retry": that only frees the format
+                    // for Google's page-level ads, and the fresh slot then answers empty. The
+                    // slot is looked up in GPT's own list instead of trusting ads-keys.js'
+                    // variable, because async script order is not guaranteed.
+                    var interPending = false;
+                    var interStarted = false;
+
+                    function startInterstitial(reason) {
+                        if (state !== S.REWARD_FAILED || interStarted) return;
+                        // Something is already on screen (the optional banner overlay): starting
+                        // a second full-screen ad would show both.
+                        if (fullScreenShown) { go(S.FINISHED, 'an ad is already on screen'); return; }
+                        interStarted = true;
+                        go(S.INTER_LOADING, reason);
+                        if (useOwnInterstitial) requestOwnInterstitial();
+                        else watchPageLevelInterstitial();
                     }
 
-                    if (useOwnInterstitial) {
+                    function endInterstitial(filled, detail) {
+                        interPending = false;
+                        if (state !== S.INTER_LOADING) return;   // a late answer
+                        if (filled) {
+                            // GPT owns the display of a web interstitial: a filled one is
+                            // shown on the next eligible user action (the triggers above).
+                            fullScreenShown = true;
+                            go(S.INTER_SHOWING, detail);
+                            fillReport('interstitial ' + detail);
+                            return;
+                        }
+                        go(S.FINISHED, detail);
+                        // Never a blank overlay: either the explicitly enabled banner tier
+                        // or nothing at all, plus one banner refresh so the page shows an ad.
+                        if (allowDisplayFallback) prepareDisplayAd();
+                        else refreshInPageBanners();
+                        fillReport('finished — ' + detail);
+                    }
+
+                    // 'own': ads-keys.js defined the slot before enableServices() and GPT has
+                    // already requested it — reuse that slot and read its verdict.
+                    function requestOwnInterstitial() {
                         interSlot = findInterstitialSlot();
-                        var interSlotIsNew = false;
                         if (!interSlot) {
                             interSlot = googletag.defineOutOfPageSlot(
                                 window.adsKeys.interstitial_001,
                                 googletag.enums.OutOfPageFormat.INTERSTITIAL
                             );
-                            interSlotIsNew = !!interSlot;
+                            if (interSlot) { interSlot.addService(pubads); googletag.display(interSlot); }
                         }
-                        if (interSlot) {
-                            armInterstitialTriggers(interSlot);
-                            if (interSlotIsNew) {
-                                interSlot.addService(pubads);
-                                interSlotId = interSlot.getSlotElementId();
-                                googletag.display(interSlot);
-                            } else {
-                                // already requested by ads-keys.js — GPT shows it itself when
-                                // it fills; re-displaying would log "Format already created".
-                                interSlotId = interSlot.getSlotElementId();
-                            }
-                        }
-                    } else {
-                        // Registering nothing is the fix: it leaves the interstitial format
-                        // free so the Google page-level ad can take it.
-                        console.log('Interstitial: ' + window.adsKeys.interstitial_001 + ' is NOT registered (no eligible ad on that unit) — the format is left free for the Google page-level interstitial.');
-                        armPageLevelInterstitial(12);
-                    }
-
-                    // Diagnostic only: report what Google's page-level interstitial decides.
-                    pubads.addEventListener('slotRenderEnded', function (e) {
-                        var path = e.slot ? e.slot.getAdUnitPath() : '';
-                        if (!path || path.indexOf('/Latest') === -1) return;
-                        if (e.isEmpty) {
-                            console.log('Page-level interstitial ' + path + ': NO FILL (Google answered empty)');
-                        } else {
-                            // Filled is NOT shown — Google waits for an eligible user action.
-                            armPageLevelInterstitial(1);
-                            console.log('Page-level interstitial ' + path + ': FILLED → waiting for an eligible user action (link click' + (triggersArmed ? ' or an armed trigger' : ')') + '.');
-                        }
-                    });
-
-                    /* ---------- ESCALATE: interstitial (up to 2 tries), then display ---------- */
-                    // GPT ignores display()/refresh() on an already-requested out-of-page
-                    // slot, so a real re-request needs destroy + redefine + display. A single
-                    // no-fill is often transient, so the interstitial gets a second attempt
-                    // and the in-page banners get a refresh — the goal is that at least one
-                    // ad unit really renders.
-                    var escalated = false;
-                    var interAttempts = 0;
-                    var interInFlight = false;
-                    var MAX_INTER_ATTEMPTS = 2;
-
-                    function escalateNow(reason) {
-                        if (escalated) return;
-                        escalated = true;
-                        if (!useOwnInterstitial) {
-                            // Nothing to escalate to: no banner is allowed and our own
-                            // interstitial unit is deliberately not registered.
-                            console.log('Rewarded unavailable (' + reason + ') → no full-screen ad requested by us; the Google page-level interstitial has the format.');
-                            fillReport('page-level interstitial mode');
+                        if (!interSlot) {
+                            // GPT said no. Say honestly WHY — blaming a phantom holder made a
+                            // plain "this page cannot open the format" failure look like a
+                            // duplicate-slot problem.
+                            var holder = findInterstitialSlot();
+                            endInterstitial(false, 'NOT REQUESTED — ' + (holder
+                                ? "the interstitial format is already held by '" + holder.getSlotElementId() + "'"
+                                : 'GPT would not create an interstitial slot on this page'));
                             return;
                         }
-                        tryInterstitial(reason);
+                        interSlotId = interSlot.getSlotElementId();
+                        armInterstitialTriggers(interSlot);
+                        interPending = true;
+                        console.log('Interstitial: watching ' + window.adsKeys.interstitial_001 + ' (' + interSlotId + ') for ' + AD_CONFIG.interstitialTimeoutMs + ' ms.');
+                        pollUntil(function () {
+                            if (renderInfo[interSlotId] === false || isFilled(interSlotId)) return 'FILLED';
+                            if (renderInfo[interSlotId] === true) return 'NO FILL';
+                            return null;
+                        }, AD_CONFIG.interstitialTimeoutMs, function (verdict) {
+                            endInterstitial(verdict === 'FILLED',
+                                (verdict || answerOf(interSlotId)) + ' on ' + window.adsKeys.interstitial_001);
+                        });
                     }
 
-                    function tryInterstitial(reason) {
-                        if (interAttempts >= MAX_INTER_ATTEMPTS) { interInFlight = false; tryDisplayOrBail(); return; }
-                        interAttempts++;
-                        interInFlight = true;
-                        console.log('Interstitial attempt ' + interAttempts + ' (' + reason + ').');
-                        // Free the interstitial format FIRST — destroying only our own handle
-                        // leaves a duplicate registration behind, and GPT then refuses the
-                        // fresh slot ("Format already created") so no ad is requested at all.
-                        var stale = [];
-                        try {
-                            stale = (pubads.getSlots() || []).filter(function (s) {
-                                return s.getAdUnitPath() === window.adsKeys.interstitial_001;
-                            });
-                        } catch (e) { }
-                        if (stale.length) { try { googletag.destroySlots(stale); } catch (e) { } }
-                        interSlot = null;
-                        var fresh = googletag.defineOutOfPageSlot(
-                            window.adsKeys.interstitial_001,
-                            googletag.enums.OutOfPageFormat.INTERSTITIAL
-                        );
-                        // GPT allows exactly ONE out-of-page interstitial per page. If the
-                        // format is still held (ads-keys.js defined it at load, or Google's
-                        // own page-level ads did) this returns null and NO request goes out.
-                        // That is not a no-fill, so it must not be logged as one.
-                        if (!fresh) {
-                            var held = findInterstitialSlot();
-                            console.log('Interstitial attempt ' + interAttempts + ': NOT REQUESTED — the interstitial format is already held on this page'
-                                + (held ? " by '" + held.getSlotElementId() + "'" : '') + '.');
-                            if (!held) { interInFlight = false; tryDisplayOrBail(); return; }
-                            interSlotId = held.getSlotElementId();
-                            setTimeout(function () {
-                                interInFlight = false;
-                                if (isFilled(interSlotId)) {
-                                    adShown = true;
-                                    console.log('Interstitial filled → GPT is showing it.');
-                                    fillReport('interstitial filled');
-                                } else {
-                                    console.log('Interstitial (' + interSlotId + '): ' + describeAnswer(interSlotId) + '.');
-                                    tryDisplayOrBail();
-                                }
-                            }, 4000);
-                            return;
-                        }
-                        interSlot = fresh;
-                        fresh.addService(pubads);
-                        var fid = fresh.getSlotElementId();
-                        interSlotId = fid;
-                        googletag.display(fresh);
-                        setTimeout(function () {
-                            interInFlight = false;
-                            if (isFilled(fid)) {
-                                adShown = true;
-                                console.log('Interstitial filled → GPT is showing it.');
-                                fillReport('interstitial filled');
-                                return;
-                            }
-                            console.log('Interstitial attempt ' + interAttempts + ': ' + describeAnswer(fid) + '.');
-                            if (interAttempts < MAX_INTER_ATTEMPTS) tryInterstitial('previous attempt had no fill');
-                            else tryDisplayOrBail();
-                        }, 4000);
-                    }
-
-                    // Interstitial gave up → the display ladder, but ONLY when the banner
-                    // fallback is explicitly allowed. Otherwise nothing more is shown: the
-                    // visitor keeps the page instead of getting a banner dressed as an ad.
-                    function tryDisplayOrBail() {
-                        if (!allowDisplayFallback) {
-                            console.log('No full-screen ad served and the banner fallback is off → showing nothing (no blank page).');
-                            refreshInPageBanners();
-                            fillReport('no full-screen ad');
-                            return;
-                        }
-                        prepareDisplayAd();
-                    }
-
-                    // 'NO FILL' must only ever be logged for a slot Google actually
-                    // answered. A slot that was never sent (GPT refused the format) is a
-                    // completely different problem, and treating it as a no-fill made the
-                    // retry loop report an ad unit that was never requested.
-                    function describeAnswer(id) {
-                        if (!id) return 'NOT REQUESTED (no slot)';
-                        if (renderInfo[id] === false) return 'FILLED';
-                        if (renderInfo[id] === true) return 'NO FILL — Google answered empty';
-                        return 'NOT ANSWERED (no slotRenderEnded for it)';
+                    // 'pagelevel': our own unit is deliberately NOT registered so Google's
+                    // page-level ads script can take the format. We create nothing and must
+                    // NOT assume an ad will appear just because no custom interstitial was
+                    // registered — measured on the live site Google answers empty on most
+                    // loads and sometimes creates no page-level slot at all.
+                    function watchPageLevelInterstitial() {
+                        console.log('Interstitial: ' + window.adsKeys.interstitial_001 + ' is not registered — reading Google\'s page-level interstitial instead.');
+                        interPending = true;
+                        pollUntil(function () {
+                            var slot = findPageLevelInterstitialSlot();
+                            if (!slot) return null;
+                            interSlot = slot;
+                            interSlotId = slot.getSlotElementId();
+                            armInterstitialTriggers(slot);
+                            if (renderInfo[interSlotId] === false || isFilled(interSlotId)) return 'FILLED';
+                            if (renderInfo[interSlotId] === true) return 'NO FILL';
+                            return null;
+                        }, AD_CONFIG.interstitialTimeoutMs, function (verdict) {
+                            endInterstitial(verdict === 'FILLED',
+                                (verdict || answerOf(interSlotId)) +
+                                (interSlot ? ' on ' + interSlot.getAdUnitPath() : ' — Google created no page-level interstitial slot on this load'));
+                        });
                     }
 
                     /* ---------- DIAGNOSTICS: which ad unit filled and which did not ---------- */
@@ -633,36 +687,40 @@
                         setTimeout(function () { fillReport('after banner refresh'); }, 4000);
                     }
 
-                    /* ---------- TIER 1: rewarded ---------- */
-                    // A GAM rewarded slot reports "filled" even when its video creative
-                    // cannot deliver a media file (black screen, frozen progress bar), so
-                    // repeated breakage is remembered and reward is skipped for a while.
-                    var STRIKE_KEY = 'fqRewardBrokenStrikes';
-                    function saveStrikes(n) { try { localStorage.setItem(STRIKE_KEY, String(n)); } catch (e) { } }
-                    var brokenStrikes = 0;
-                    try { brokenStrikes = parseInt(localStorage.getItem(STRIKE_KEY) || '0', 10) || 0; } catch (e) { }
-                    var skipReward = brokenStrikes >= 2 || !rewardShouldBeTried();
-                    var skipReason = rewardShouldBeTried()
-                        ? 'rewarded marked broken on recent visits'
-                        : (rewardMode === 'never' ? rewardOffReason : 'this environment cannot play rewarded video');
-
-                    // When skipping we don't even define/request the rewarded slot, so no
-                    // dead rewarded ad unit sits on the page.
-                    var rewardedSlot = skipReward ? null : googletag.defineOutOfPageSlot(
-                        window.adsKeys.rewoarded_001, // GAM rewarded ad unit
-                        googletag.enums.OutOfPageFormat.REWARDED
-                    );
-
-                    if (allowDisplayFallback) prepareDisplayAd(); // else no banner is ever requested
-
-                    var rewardFilled = false;  // rewardedSlotReady fired (= creative loaded)
-                    var rewardVisible = false;
-                    var rewardDone = false;
-                    var rewardGranted = false;
+                    /* ---------- TIER 1: rewarded (always requested first) ---------- */
+                    // Nothing is remembered between page views any more. An earlier version
+                    // kept a "broken creative" strike counter in localStorage and stopped
+                    // requesting the rewarded tier after two bad visits — so a temporary GAM
+                    // problem permanently disabled the ad. A failure now only moves THIS page
+                    // forward: reward_loading → reward_failed → interstitial_loading.
+                    var rewardedSlot = null;
+                    var revealEvent = null;      // rewardedSlotReady event: owns makeRewardedVisible
+                    var rewardReadyTimer = null;
+                    var rewardRevealTimer = null;
+                    var rewardGuardTimer = null;
                     var rewardShownAt = 0;
+                    var rewardDone = false;      // granted or closed: nothing left to guard
+                    var rewardGranted = false;
                     var gestureHappened = false;
-                    var adShown = false;       // one ad only
+                    var listenersInstalled = false;
 
+                    // GPT allows one REWARDED slot per page, and ads-keys.js creates it before
+                    // enableServices() so its request is guaranteed to go out.
+                    function findRewardedSlot() {
+                        var slots = [];
+                        try { slots = pubads.getSlots() || []; } catch (e) { return null; }
+                        for (var i = 0; i < slots.length; i++) {
+                            if (slots[i].getAdUnitPath() === window.adsKeys.rewoarded_001) return slots[i];
+                        }
+                        return null;
+                    }
+
+                    function isOurReward(e) {
+                        return !!(e && e.slot && rewardedSlot &&
+                            e.slot.getSlotElementId() === rewardedSlot.getSlotElementId());
+                    }
+
+                    // Take a dead rewarded slot off the page (also hides the black player).
                     function hideReward() {
                         if (!rewardedSlot) return;
                         try {
@@ -673,109 +731,194 @@
                         rewardedSlot = null;
                     }
 
-                    // Video creatives render BLACK unless revealed with a user gesture.
-                    var revealReward = (function () {
-                        var runOnce = false;
-                        return function () {
-                            if (runOnce || !rewardFilled || rewardVisible || adShown) return;
-                            runOnce = true;
-                            rewardVisible = true;
-                            adShown = true;
-                            rewardShownAt = Date.now();
-                            console.log('Rewarded ad filled → showing it.');
-                            revealEvent.makeRewardedVisible();
+                    function clearRewardTimers() {
+                        clearTimeout(rewardReadyTimer);
+                        clearTimeout(rewardRevealTimer);
+                        rewardReadyTimer = rewardRevealTimer = null;
+                    }
 
-                            // Safety net: a creative that never plays out (black screen the
-                            // visitor just ignores) must not stay on screen forever.
-                            setTimeout(function () {
+                    // Rewarded never became ready: no fill, timeout, unsupported, no slot.
+                    function failReward(why) {
+                        if (state !== S.REWARD_LOADING) return;
+                        clearRewardTimers();
+                        go(S.REWARD_FAILED, why);
+                        hideReward();
+                        startInterstitial(why);
+                    }
+
+                    // Rewarded WAS on screen but its creative never played out. The visitor
+                    // must not be stranded on a black screen, so it is torn down and the
+                    // interstitial takes over.
+                    function abandonReward(why) {
+                        if (state !== S.REWARD_SHOWING) return;
+                        clearTimeout(rewardGuardTimer);
+                        fullScreenShown = false;
+                        go(S.REWARD_FAILED, why);
+                        hideReward();
+                        startInterstitial(why);
+                    }
+
+                    // Google's rewarded player needs a gesture context to autoplay video, so
+                    // the reveal happens on the first tap if there is one, else on the timer.
+                    var revealReward = (function () {
+                        var ran = false;
+                        return function () {
+                            if (ran) return;
+                            if (state !== S.REWARD_READY) return;
+                            // A rewarded ad that arrives once the flow has moved on must never
+                            // put a second ad on screen.
+                            if (adTaken()) { ran = true; hideReward(); return; }
+                            ran = true;
+                            clearTimeout(rewardRevealTimer);
+                            rewardShownAt = Date.now();
+                            go(S.REWARD_SHOWING, 'makeRewardedVisible()');
+                            fullScreenShown = true;
+                            try {
+                                revealEvent.makeRewardedVisible();
+                            } catch (err) {
+                                abandonReward('makeRewardedVisible() threw: ' + err.message);
+                                return;
+                            }
+                            rewardGuardTimer = setTimeout(function () {
                                 if (rewardDone) return;
-                                console.log('Rewarded ad never played out → hiding it (no blank screen).');
-                                saveStrikes(brokenStrikes + 1);
-                                hideReward();
-                                escalateNow('rewarded creative did not play');
-                            }, 20000);
+                                abandonReward('rewarded creative never played out (would stay a blank screen)');
+                            }, AD_CONFIG.rewardPlayGuardMs);
                         };
                     })();
+
+                    function removeGestureListeners() {
+                        ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
+                            document.removeEventListener(ev, onFirstGesture, true);
+                        });
+                    }
+
+                    function installGestureListeners() {
+                        ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
+                            document.addEventListener(ev, onFirstGesture, { capture: true, passive: true });
+                        });
+                    }
 
                     function onFirstGesture() {
                         if (gestureHappened) return;
                         gestureHappened = true;
-                        ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
-                            document.removeEventListener(ev, onFirstGesture, true);
-                        });
+                        removeGestureListeners();
                         revealReward();
                     }
 
-                    ['pointerdown', 'touchstart', 'keydown'].forEach(function (ev) {
-                        document.addEventListener(ev, onFirstGesture, { capture: true, passive: true });
-                    });
-
-                    var revealEvent = null;
-
-                    if (skipReward) {
-                        // Reward can't play here → never show a blank screen, interstitial instead
-                        console.log('Rewarded skipped (' + skipReason + ') → loading interstitial.');
-                        googletag.enableServices();
-                        escalateNow(skipReason);
-                    } else if (!rewardedSlot) {
-                        console.log('Rewarded format not supported on this device.');
-                        googletag.enableServices();
-                        escalateNow('rewarded unsupported');
-                    } else {
-                        rewardedSlot.addService(pubads);
+                    // Installed exactly once per page, so no retry can double-handle an event.
+                    function installRewardListeners() {
+                        if (listenersInstalled) return;
+                        listenersInstalled = true;
 
                         pubads.addEventListener('rewardedSlotReady', function (event) {
-                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
-                            if (adShown) return; // a lower tier already took over
-                            console.log('Rewarded ad filled — waiting for first tap to play (avoids black screen).');
+                            if (!isOurReward(event)) return;
+                            if (state !== S.REWARD_LOADING) return;   // answered after the timeout
+                            clearRewardTimers();
                             revealEvent = event;
-                            rewardFilled = true;
-                            // Don't wait forever: if the visitor taps quickly we reveal on
-                            // the gesture; otherwise reveal after a short grace period.
-                            setTimeout(revealReward, 3000);
+                            go(S.REWARD_READY, 'rewardedSlotReady fired');
+                            if (gestureHappened) revealReward();
+                            else rewardRevealTimer = setTimeout(revealReward, AD_CONFIG.rewardRevealGraceMs);
                         });
 
+                        // The creative really answered empty — do not sit and wait for a ready
+                        // event that is not coming.
+                        pubads.addEventListener('slotRenderEnded', function (e) {
+                            if (!isOurReward(e)) return;
+                            if (e.isEmpty) failReward('rewarded ad returned an empty response (no fill)');
+                        });
+
+                        // A rewarded slot that cannot be opened at all never fires
+                        // rewardedSlotReady either, so the ready-timeout below is what turns
+                        // it into reward_failed → interstitial. (Listening for a
+                        // "rewardSlotNotOpenable" event is not possible: this GPT build
+                        // rejects it — "Unknown event type", measured.)
+
                         pubads.addEventListener('rewardedSlotGranted', function (event) {
-                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
+                            if (!isOurReward(event)) return;
                             console.log('Reward granted.');
                             rewardDone = true;
                             rewardGranted = true;
-                            saveStrikes(0); // it plays fine again → reward gets priority back
+                            clearTimeout(rewardGuardTimer);
+                            removeGestureListeners();
+                            go(S.FINISHED, 'reward watched and granted');
                         });
 
                         pubads.addEventListener('rewardedSlotClosed', function (event) {
-                            if (!rewardedSlot || event.slot.getSlotElementId() !== rewardedSlot.getSlotElementId()) return;
-                            console.log('Rewarded ad closed.');
+                            if (!isOurReward(event)) return;
                             rewardDone = true;
-                            // Closed almost straight away with no reward = the visitor saw a
-                            // broken (black) creative → escalate now, don't leave them stuck.
-                            if (!rewardGranted && rewardShownAt && Date.now() - rewardShownAt < 12000) {
-                                console.log('Rewarded closed without playing → treated as broken.');
-                                saveStrikes(brokenStrikes + 1);
-                                hideReward();
-                                escalateNow('rewarded closed unplayed');
+                            clearTimeout(rewardGuardTimer);
+                            removeGestureListeners();
+                            if (rewardGranted) { go(S.FINISHED, 'rewarded closed after the reward'); return; }
+                            var watched = rewardShownAt ? Date.now() - rewardShownAt : 0;
+                            if (state === S.REWARD_SHOWING && watched < 12000) {
+                                abandonReward('rewarded closed after ' + watched + ' ms with no reward (blank creative)');
+                                return;
                             }
+                            go(S.FINISHED, 'rewarded closed');
+                            hideReward();
                         });
-
-                        googletag.enableServices();
-                        googletag.display(rewardedSlot);
                     }
 
-                    /* ---------- DECISION: pick the tier that really filled ---------- */
-                    setTimeout(function () {
-                        if (adShown || rewardFilled || escalated) return; // reward won / already escalated
+                    function startAdFlow() {
+                        // Say "requested first" only when a request is really going out.
+                        go(S.REWARD_LOADING, rewardShouldBeTried()
+                            ? 'rewarded requested first'
+                            : 'rewarded not requestable here');
+                        installRewardListeners();
+                        installGestureListeners();
+                        if (!window.__gptServicesEnabled) {
+                            try { googletag.enableServices(); } catch (e) { }
+                        }
 
-                        if (isFilled(interSlotId)) {
-                            console.log('Rewarded unavailable → interstitial filled, GPT will show it.');
-                            adShown = true;
-                            discardDisplayAd();
-                            hideReward(); // no longer needed; keeps getSlots() clean
+                        // Only a real platform limit can stop the rewarded request.
+                        if (!rewardShouldBeTried()) {
+                            failReward(rewardBlockReason());
                             return;
                         }
 
-                        hideReward(); // rewarded no-filled → drop the dead slot
-                        escalateNow('no rewarded fill');
-                    }, 8000);
+                        rewardedSlot = findRewardedSlot();
+                        var rewardedSlotIsNew = false;
+                        if (!rewardedSlot) {
+                            // Defined here rather than in ads-keys.js on purpose: the
+                            // rewardedSlotReady listener has to exist BEFORE the slot is
+                            // requested, otherwise GPT logs
+                            //   "Missing required event listener 'rewardedSlotReady' for
+                            //    Rewarded format slot" (error level, measured)
+                            // and can refuse to serve it. Reusing an existing slot also keeps
+                            // the one-REWARDED-format-per-page rule intact.
+                            rewardedSlot = googletag.defineOutOfPageSlot(
+                                window.adsKeys.rewoarded_001, // GAM rewarded ad unit
+                                googletag.enums.OutOfPageFormat.REWARDED
+                            );
+                            rewardedSlotIsNew = !!rewardedSlot;
+                            if (rewardedSlot) rewardedSlot.addService(pubads);
+                        }
+                        if (!rewardedSlot) {
+                            failReward('rewarded format unsupported here / slot could not be created');
+                            return;
+                        }
+                        if (rewardedSlotIsNew) {
+                            try { googletag.display(rewardedSlot); } catch (e) { }
+                        } else {
+                            console.log('Rewarded: reusing the rewarded slot already on this page.');
+                        }
+                        console.log('Rewarded: requested ' + window.adsKeys.rewoarded_001 +
+                            ' — waiting up to ' + AD_CONFIG.rewardReadyTimeoutMs + ' ms for rewardedSlotReady.');
+
+                        // Never an indefinite wait: no ready event → rewarded failed → the
+                        // interstitial fallback starts.
+                        rewardReadyTimer = setTimeout(function () {
+                            if (state !== S.REWARD_LOADING) return;
+                            failReward('no rewardedSlotReady within ' + AD_CONFIG.rewardReadyTimeoutMs +
+                                ' ms (' + answerOf(rewardedSlot ? rewardedSlot.getSlotElementId() : null) + ')');
+                        }, AD_CONFIG.rewardReadyTimeoutMs);
+                    }
+
+                    // The banner tier is only warmed up when it was explicitly enabled;
+                    // otherwise no display ad is ever requested.
+                    if (allowDisplayFallback) prepareDisplayAd();
+
+                    startAdFlow();
                 });
             }
         }, 1000);

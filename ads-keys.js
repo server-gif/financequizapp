@@ -50,6 +50,13 @@ window.interstitialSource = (function () {
 })();
 
 googletag.cmd.push(function () {
+  // The REWARDED slot is deliberately NOT defined here. GPT requires the
+  // rewardedSlotReady listener to exist before a Rewarded-format slot is requested,
+  // and defining it here (before google-reward.js has registered anything) logs
+  //   "[GPT] Missing required event listener 'rewardedSlotReady' for Rewarded format
+  //    slot" (error level, measured) and can stop the ad being served. It also made
+  //   ?admode=never still define a rewarded slot. google-reward.js registers its
+  // listeners first and then defines + displays the rewarded slot itself.
   if (window.interstitialSource === "own") {
     interstitialSlot = googletag.defineOutOfPageSlot(
       adsKeys.interstitial_001,
@@ -62,6 +69,9 @@ googletag.cmd.push(function () {
   // enableServices() has to run either way — it used to sit inside the slot check,
   // so skipping the interstitial would have stopped every other ad request too.
   googletag.enableServices();
+  // google-reward.js checks this instead of calling enableServices() a second time,
+  // which GPT reports as an error.
+  window.__gptServicesEnabled = true;
 });
 
 /*-------------- End ----------------------*/
