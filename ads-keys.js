@@ -28,26 +28,11 @@ googletag.cmd.push(function () {
   }
 });
 
-// WHO OWNS THE PAGE'S ONE INTERSTITIAL FORMAT?
-// GPT allows exactly one out-of-page INTERSTITIAL per page. Measured on the live
-// site: /23338698373/financequizapp_interstitial_001 answers EVERY request with
-// isEmpty:true and lineItemId:null (at 1x1 out-of-page AND at 320x480/300x250/
-// 336x280), i.e. the ad unit has no eligible ad at all. At the same time Google's
-// own page-level ads script logs
-//   "[GPT] Interstitial /23338698373/Latest3 not requested: Format already created
-//    on the page."
-// — it wants to run a real interstitial and our empty unit is what blocks it.
-//   'pagelevel' → register nothing here, so Google's page-level interstitial can
-//                 serve (it draws on the same demand that fills display_001).
-//   'own'       → the old behaviour: our GAM ad unit takes the format.
-// Override for one load with ?inter=own or ?inter=pagelevel.
-window.interstitialSource = (function () {
-  try {
-    var q = new URLSearchParams(window.location.search).get("inter");
-    if (q === "own" || q === "pagelevel") return q;
-  } catch (e) {}
-  return "pagelevel";
-})();
+// THE PAGE'S ONE INTERSTITIAL = OUR OWN GAM AD UNIT (adsKeys.interstitial_001).
+// GPT allows exactly one out-of-page INTERSTITIAL per page, so it is registered
+// here, straight after the ad units are declared, and google-reward.js reuses it
+// when the rewarded ad does not serve. Only the tags in window.adsKeys above are
+// used — no Google page-level ("Latest…") unit is read or requested anywhere.
 
 googletag.cmd.push(function () {
   // The REWARDED slot is deliberately NOT defined here. GPT requires the
@@ -57,14 +42,13 @@ googletag.cmd.push(function () {
   //    slot" (error level, measured) and can stop the ad being served. It also made
   //   ?admode=never still define a rewarded slot. google-reward.js registers its
   // listeners first and then defines + displays the rewarded slot itself.
-  if (window.interstitialSource === "own") {
-    interstitialSlot = googletag.defineOutOfPageSlot(
-      adsKeys.interstitial_001,
-      googletag.enums.OutOfPageFormat.INTERSTITIAL,
-    );
+  // Our own interstitial ad unit takes the page's one INTERSTITIAL format.
+  interstitialSlot = googletag.defineOutOfPageSlot(
+    adsKeys.interstitial_001,
+    googletag.enums.OutOfPageFormat.INTERSTITIAL,
+  );
 
-    if (interstitialSlot) interstitialSlot.addService(googletag.pubads());
-  }
+  if (interstitialSlot) interstitialSlot.addService(googletag.pubads());
 
   // enableServices() has to run either way — it used to sit inside the slot check,
   // so skipping the interstitial would have stopped every other ad request too.

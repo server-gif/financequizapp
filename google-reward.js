@@ -54,9 +54,6 @@
     // unit is never requested into the overlay and never promoted, so an unfilled
     // interstitial simply shows nothing instead of falling back to a banner.
     // Override for one load with ?adfallback=on (or force off with ?adfallback=off).
-    // Related switch: window.interstitialSource in ads-keys.js (?inter=own|pagelevel)
-    // picks whether our GAM interstitial unit or Google's page-level ad gets the one
-    // interstitial format the page is allowed to register.
     var allowDisplayFallback = false;
     try {
         var fbParam = new URLSearchParams(window.location.search).get('adfallback');
@@ -468,17 +465,8 @@
 
                     var interSlot = null;
                     var interSlotId = null;
-                    // WHO GETS THE PAGE'S ONE INTERSTITIAL FORMAT? decided in ads-keys.js
-                    // (window.interstitialSource, overridable with ?inter=own|pagelevel).
-                    // 'pagelevel' is the default because the live measurements are blunt:
-                    // financequizapp_interstitial_001 answers EVERY request isEmpty:true with
-                    // lineItemId:null — at the out-of-page 1x1 AND at 320x480 / 300x250 /
-                    // 336x280 — so the ad unit simply has no eligible ad, while Google's
-                    // page-level ads logs "Interstitial /23338698373/Latest3 not requested:
-                    // Format already created on the page". Our empty unit is the thing
-                    // blocking Google's own interstitial, which draws on the demand that
-                    // demonstrably does serve on this network (display_001 fills).
-                    var useOwnInterstitial = window.interstitialSource !== 'pagelevel';
+                    // ONE TAG, ONE JOB: this tier only ever talks to our own GAM unit
+                    // window.adsKeys.interstitial_001, registered in ads-keys.js.
 
                     /* ---------- WEB INTERSTITIAL TRIGGERS ---------- */
                     // Google's own docs: web interstitials are "full-page ads that appear in
@@ -533,34 +521,11 @@
                         }
                     }
 
-                    // Google creates its page-level slot itself, so it may not exist yet.
-                    function findPageLevelInterstitialSlot() {
-                        var slots = [], found = null;
-                        try { slots = pubads.getSlots() || []; } catch (e) { return null; }
-                        for (var i = 0; i < slots.length; i++) {
-                            if (/\/Latest\d*$/.test(slots[i].getAdUnitPath() || '')) found = slots[i];
-                        }
-                        return found;
-                    }
-
-                    // Nothing is registered or requested here. The interstitial tier only
-                    // starts once the rewarded tier has really failed (startInterstitial),
-                    // so there is exactly one moment when the format is touched.
-                    // Diagnostic: report what Google's own page-level interstitial decides.
-                    pubads.addEventListener('slotRenderEnded', function (e) {
-                        var path = e.slot ? e.slot.getAdUnitPath() : '';
-                        if (!path || path.indexOf('/Latest') === -1) return;
-                        console.log('Page-level interstitial ' + path + ': ' + (e.isEmpty
-                            ? 'NO FILL (Google answered empty)'
-                            : 'FILLED → GPT shows it on an eligible user action (link click or an armed trigger).'));
-                    });
-
                     /* ---------- TIER 2: interstitial (the rewarded fallback) ---------- */
                     // GPT allows exactly ONE out-of-page interstitial per page, so this tier
-                    // never destroys + redefines slots to "retry": that only frees the format
-                    // for Google's page-level ads, and the fresh slot then answers empty. The
-                    // slot is looked up in GPT's own list instead of trusting ads-keys.js'
-                    // variable, because async script order is not guaranteed.
+                    // never destroys + redefines slots to "retry". The slot is looked up in
+                    // GPT's own list instead of trusting ads-keys.js' variable, because async
+                    // script order is not guaranteed.
                     var interPending = false;
                     var interStarted = false;
 
@@ -571,8 +536,7 @@
                         if (fullScreenShown) { go(S.FINISHED, 'an ad is already on screen'); return; }
                         interStarted = true;
                         go(S.INTER_LOADING, reason);
-                        if (useOwnInterstitial) requestOwnInterstitial();
-                        else watchPageLevelInterstitial();
+                        requestOwnInterstitial();
                     }
 
                     function endInterstitial(filled, detail) {
@@ -594,8 +558,8 @@
                         fillReport('finished — ' + detail);
                     }
 
-                    // 'own': ads-keys.js defined the slot before enableServices() and GPT has
-                    // already requested it — reuse that slot and read its verdict.
+                    // ads-keys.js defines the slot before enableServices(), so GPT has usually
+                    // requested it already — reuse that slot and read its verdict.
                     function requestOwnInterstitial() {
                         interSlot = findInterstitialSlot();
                         if (!interSlot) {
@@ -629,30 +593,6 @@
                         });
                     }
 
-                    // 'pagelevel': our own unit is deliberately NOT registered so Google's
-                    // page-level ads script can take the format. We create nothing and must
-                    // NOT assume an ad will appear just because no custom interstitial was
-                    // registered — measured on the live site Google answers empty on most
-                    // loads and sometimes creates no page-level slot at all.
-                    function watchPageLevelInterstitial() {
-                        console.log('Interstitial: ' + window.adsKeys.interstitial_001 + ' is not registered — reading Google\'s page-level interstitial instead.');
-                        interPending = true;
-                        pollUntil(function () {
-                            var slot = findPageLevelInterstitialSlot();
-                            if (!slot) return null;
-                            interSlot = slot;
-                            interSlotId = slot.getSlotElementId();
-                            armInterstitialTriggers(slot);
-                            if (renderInfo[interSlotId] === false || isFilled(interSlotId)) return 'FILLED';
-                            if (renderInfo[interSlotId] === true) return 'NO FILL';
-                            return null;
-                        }, AD_CONFIG.interstitialTimeoutMs, function (verdict) {
-                            endInterstitial(verdict === 'FILLED',
-                                (verdict || answerOf(interSlotId)) +
-                                (interSlot ? ' on ' + interSlot.getAdUnitPath() : ' — Google created no page-level interstitial slot on this load'));
-                        });
-                    }
-
                     /* ---------- DIAGNOSTICS: which ad unit filled and which did not ---------- */
                     function fillReport(tag) {
                         try {
@@ -666,7 +606,9 @@
                                 return { adUnit: s.getAdUnitPath(), slot: id, fill: state };
                             });
                             console.log('=== AD FILL REPORT (' + tag + ') ===');
-                            rows.forEach(function (r) { console.log('  ' + r.fill.padEnd(22) + r.adUnit); });
+                            // padEnd has to be wider than the longest label below
+                            // ('FILLED (no render event)' is 23 chars) or the columns run together.
+                            rows.forEach(function (r) { console.log('  ' + r.fill.padEnd(26) + r.adUnit); });
                             return rows;
                         } catch (e) { return []; }
                     }
