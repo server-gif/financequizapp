@@ -15,8 +15,15 @@
         // has not touched the page yet (Google's player autoplays inside a gesture).
         rewardRevealGraceMs: 2500,
         // Visible but the creative never plays out (a fill with no media file shows
-        // as a full-screen black player) → tear it down after this long.
-        rewardPlayGuardMs: 20000,
+        // as a full-screen BLACK player — measured on live 2026-10-21: rewardedSlotReady
+        // fired, makeRewardedVisible() ran, and the visitor got a black box with player
+        // chrome and no video frames). The proof that something is really playing is the
+        // media itself: a working video creative fetches .mp4/.webm/videoplayback URLs,
+        // the black one fetched ZERO (measured). If no media request appears in this
+        // window the ad is torn down and the interstitial tier takes over. ?rpg= tunes it
+        // — too low can cut a slow-starting real ad short, too long strands the visitor
+        // on a black screen.
+        rewardPlayGuardMs: 10000,
         // Wait this long for the interstitial's own render verdict.
         interstitialTimeoutMs: 8000,
         // Platform/consent eligibility only — never a memory of past failures.
@@ -30,6 +37,8 @@
 
     // Tune or disable per load without editing this file:
     //   ?rttl=8000      rewarded ready-timeout (ms)
+    //   ?rpg=8000       how long a visible rewarded ad may stay without playing video
+    //   ?rrg=2500       delay before an untouched page auto-reveals the rewarded ad
     //   ?ittl=6000      interstitial verdict-timeout (ms)
     //   ?admode=never   skip the rewarded tier (platform check only, no ad is
     //                   "remembered" as broken)
@@ -42,6 +51,8 @@
         };
         cfgNum('rttl', 'rewardReadyTimeoutMs');
         cfgNum('ittl', 'interstitialTimeoutMs');
+        cfgNum('rpg', 'rewardPlayGuardMs');
+        cfgNum('rrg', 'rewardRevealGraceMs');
         var modeParam = cfgQs.get('admode');
         if (modeParam === 'never') AD_CONFIG.allowRewarded = false;
         if (modeParam === 'always') AD_CONFIG.forceRewarded = true;
@@ -643,6 +654,11 @@
                     var rewardShownAt = 0;
                     var rewardDone = false;      // granted or closed: nothing left to guard
                     var rewardGranted = false;
+                    // Set once the creative is proven to be playing (it fetched a video
+                    // file). It is what separates a working rewarded ad from the black
+                    // shell GAM served on 2026-10-21, and it stops a visitor who simply
+                    // closes a playing ad from being treated as a failure.
+                    var rewardPlayed = false;
                     var gestureHappened = false;
                     var listenersInstalled = false;
 
@@ -664,14 +680,51 @@
 
                     // Take a dead rewarded slot off the page (also hides the black player).
                     function hideReward() {
-                        if (!rewardedSlot) return;
+                        if (rewardedSlot) {
+                            try {
+                                var oop = document.getElementById(rewardedSlot.getSlotElementId());
+                                if (oop) oop.style.setProperty('display', 'none', 'important');
+                            } catch (e) { }
+                            try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
+                            rewardedSlot = null;
+                        }
+                        // destroySlots() does not always remove the full-screen shell Google
+                        // injected for the rewarded player, and a leftover black layer would
+                        // cover the rest of the flow. Only body-level FIXED nodes whose id
+                        // Google generated are touched — in-page banner containers are static
+                        // and stay untouched, and nothing in this project uses an id starting
+                        // with "google_".
                         try {
-                            var oop = document.getElementById(rewardedSlot.getSlotElementId());
-                            if (oop) oop.style.setProperty('display', 'none', 'important');
+                            var leftover = document.querySelectorAll('[id^="google_"]');
+                            for (var li = 0; li < leftover.length; li++) {
+                                var el = leftover[li];
+                                if (el.parentNode !== document.body) continue;
+                                var cs = window.getComputedStyle(el);
+                                var r = el.getBoundingClientRect();
+                                if (cs.position === 'fixed' && cs.display !== 'none' &&
+                                    r.width >= window.innerWidth * 0.6 && r.height >= window.innerHeight * 0.6) {
+                                    console.log('Removing leftover rewarded layer #' + el.id);
+                                    el.parentNode.removeChild(el);
+                                }
+                            }
                         } catch (e) { }
-                        try { googletag.destroySlots([rewardedSlot]); } catch (e) { }
-                        rewardedSlot = null;
                     }
+
+                    // videoProgress would be the natural "it is playing" signal, but this
+                    // GPT build rejects it — measured: "[GPT] Failed to register listener.
+                    // Unknown event type: videoProgress." So playback is detected from the
+                    // network instead: count the media file requests the page has seen.
+                    var MEDIA_URL_RE = /videoplayback|\.mp4|\.webm|\.m3u8|googlevideo|youtubei|\/pubvideo|doubleclick.*video|googlesyndication.*video/i;
+                    function mediaFetchCount() {
+                        try {
+                            var list = performance.getEntriesByType('resource') || [], n = 0;
+                            for (var i = 0; i < list.length; i++) {
+                                if (MEDIA_URL_RE.test(list[i].name)) n++;
+                            }
+                            return n;
+                        } catch (e) { return 0; }
+                    }
+                    var rewardedMediaBaseline = 0;
 
                     function clearRewardTimers() {
                         clearTimeout(rewardReadyTimer);
@@ -713,6 +766,9 @@
                             ran = true;
                             clearTimeout(rewardRevealTimer);
                             rewardShownAt = Date.now();
+                            // Anything already fetched is not this creative's video; only
+                            // requests that appear AFTER the reveal prove playback.
+                            rewardedMediaBaseline = mediaFetchCount();
                             go(S.REWARD_SHOWING, 'makeRewardedVisible()');
                             fullScreenShown = true;
                             try {
@@ -723,7 +779,14 @@
                             }
                             rewardGuardTimer = setTimeout(function () {
                                 if (rewardDone) return;
-                                abandonReward('rewarded creative never played out (would stay a blank screen)');
+                                var seen = mediaFetchCount() - rewardedMediaBaseline;
+                                if (seen > 0) {
+                                    rewardPlayed = true;
+                                    console.log('Rewarded: ' + seen + ' video file request(s) after the reveal → the creative really is playing, keeping it on screen.');
+                                    return;
+                                }
+                                abandonReward('rewarded player fetched no video file in ' + AD_CONFIG.rewardPlayGuardMs +
+                                    ' ms (blank/black creative)');
                             }, AD_CONFIG.rewardPlayGuardMs);
                         };
                     })();
@@ -791,6 +854,9 @@
                             clearTimeout(rewardGuardTimer);
                             removeGestureListeners();
                             if (rewardGranted) { go(S.FINISHED, 'rewarded closed after the reward'); return; }
+                            // The video really played and the visitor chose to leave: that is
+                            // normal behaviour, not a broken creative — never escalate on it.
+                            if (rewardPlayed) { go(S.FINISHED, 'rewarded played but was closed before the reward'); return; }
                             var watched = rewardShownAt ? Date.now() - rewardShownAt : 0;
                             if (state === S.REWARD_SHOWING && watched < 12000) {
                                 abandonReward('rewarded closed after ' + watched + ' ms with no reward (blank creative)');
