@@ -28,6 +28,19 @@
         if (modeParam === 'always' || modeParam === 'auto' || modeParam === 'never') rewardMode = modeParam;
     } catch (e) { }
 
+    // FULL-SCREEN FORMATS ONLY. The ad shown over the first page is either a REWARDED
+    // video or an INTERSTITIAL — never a display/banner creative stretched into an
+    // overlay. A promoted banner is exactly what looked like "a banner appeared in the
+    // content and then turned into an interstitial". While this is false, a display
+    // unit is never requested into the overlay and never promoted, so an unfilled
+    // interstitial simply shows nothing instead of falling back to a banner.
+    // Override for a single load with ?adfallback=on (or force off with ?adfallback=off).
+    var allowDisplayFallback = false;
+    try {
+        var fbParam = new URLSearchParams(window.location.search).get('adfallback');
+        if (fbParam === 'on' || fbParam === 'off') allowDisplayFallback = fbParam === 'on';
+    } catch (e) { }
+
     function isBrokenVideoEnvironment() {
         var ua = navigator.userAgent || '';
         return /electron|headlesschrome/i.test(ua) && !/crios|edg\//i.test(ua);
@@ -193,17 +206,17 @@
                         return !!(el && el.querySelector && el.querySelector('iframe'));
                     }
 
-                    /* ---------- TIER 3: full-screen fallback (never a banner) ---------- */
-                    // Two measured facts shape this tier:
+                    /* ---------- TIER 3: display fallback — DISABLED by default ---------- */
+                    // Kept behind allowDisplayFallback (see the config at the top) so the
+                    // first-page ad is a rewarded video or an interstitial and never a
+                    // banner. Two measured facts about this tier, if it is ever enabled:
                     //  1. Google refuses to fill a slot whose container is off-screen — the
                     //     same display_002 slot went isEmpty:true at adxs=-9999 and
                     //     isEmpty:false (real creative) once it had on-screen coordinates.
-                    //  2. A visible container makes the ad pop up as a banner and then
-                    //     "convert" into an interstitial, which looks broken.
-                    // So the wrapper IS the full-screen ad from the start, just fully
-                    // transparent and click-through until a creative really renders; only
-                    // then does it become visible. The visitor ever sees one thing: a
-                    // full-screen ad — never a banner in the page.
+                    //  2. A container that is visible while it waits makes the ad pop up as
+                    //     a banner and then "convert" into an interstitial, which looks
+                    //     broken. So the wrapper IS the full-screen ad from the start, just
+                    //     transparent and click-through until a creative really renders.
                     // financequizapp_display_003 is not used (no inventory at all) and
                     // display_001 is not used here either, because it is already the in-page
                     // banner and Google answers the same creative twice.
@@ -405,10 +418,33 @@
                             window.adsKeys.interstitial_001,
                             googletag.enums.OutOfPageFormat.INTERSTITIAL
                         );
-                        if (!fresh) { interInFlight = false; tryDisplayOrBail(); return; }
+                        // GPT allows exactly ONE out-of-page interstitial per page. If the
+                        // format is still held (ads-keys.js defined it at load, or Google's
+                        // own page-level ads did) this returns null and NO request goes out.
+                        // That is not a no-fill, so it must not be logged as one.
+                        if (!fresh) {
+                            var held = findInterstitialSlot();
+                            console.log('Interstitial attempt ' + interAttempts + ': NOT REQUESTED — the interstitial format is already held on this page'
+                                + (held ? " by '" + held.getSlotElementId() + "'" : '') + '.');
+                            if (!held) { interInFlight = false; tryDisplayOrBail(); return; }
+                            interSlotId = held.getSlotElementId();
+                            setTimeout(function () {
+                                interInFlight = false;
+                                if (isFilled(interSlotId)) {
+                                    adShown = true;
+                                    console.log('Interstitial filled → GPT is showing it.');
+                                    fillReport('interstitial filled');
+                                } else {
+                                    console.log('Interstitial (' + interSlotId + '): ' + describeAnswer(interSlotId) + '.');
+                                    tryDisplayOrBail();
+                                }
+                            }, 4000);
+                            return;
+                        }
                         interSlot = fresh;
                         fresh.addService(pubads);
                         var fid = fresh.getSlotElementId();
+                        interSlotId = fid;
                         googletag.display(fresh);
                         setTimeout(function () {
                             interInFlight = false;
@@ -418,15 +454,34 @@
                                 fillReport('interstitial filled');
                                 return;
                             }
-                            console.log('Interstitial attempt ' + interAttempts + ' → NO FILL.');
+                            console.log('Interstitial attempt ' + interAttempts + ': ' + describeAnswer(fid) + '.');
                             if (interAttempts < MAX_INTER_ATTEMPTS) tryInterstitial('previous attempt had no fill');
                             else tryDisplayOrBail();
                         }, 4000);
                     }
 
-                    // Interstitial gave up → run the display ladder (each unit one chance).
+                    // Interstitial gave up → the display ladder, but ONLY when the banner
+                    // fallback is explicitly allowed. Otherwise nothing more is shown: the
+                    // visitor keeps the page instead of getting a banner dressed as an ad.
                     function tryDisplayOrBail() {
+                        if (!allowDisplayFallback) {
+                            console.log('No full-screen ad served and the banner fallback is off → showing nothing (no blank page).');
+                            refreshInPageBanners();
+                            fillReport('no full-screen ad');
+                            return;
+                        }
                         prepareDisplayAd();
+                    }
+
+                    // 'NO FILL' must only ever be logged for a slot Google actually
+                    // answered. A slot that was never sent (GPT refused the format) is a
+                    // completely different problem, and treating it as a no-fill made the
+                    // retry loop report an ad unit that was never requested.
+                    function describeAnswer(id) {
+                        if (!id) return 'NOT REQUESTED (no slot)';
+                        if (renderInfo[id] === false) return 'FILLED';
+                        if (renderInfo[id] === true) return 'NO FILL — Google answered empty';
+                        return 'NOT ANSWERED (no slotRenderEnded for it)';
                     }
 
                     /* ---------- DIAGNOSTICS: which ad unit filled and which did not ---------- */
@@ -483,7 +538,7 @@
                         googletag.enums.OutOfPageFormat.REWARDED
                     );
 
-                    prepareDisplayAd(); // fetched in parallel, shown only if it fills
+                    if (allowDisplayFallback) prepareDisplayAd(); // else no banner is ever requested
 
                     var rewardFilled = false;  // rewardedSlotReady fired (= creative loaded)
                     var rewardVisible = false;
