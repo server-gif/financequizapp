@@ -389,7 +389,14 @@
                     // Google still applies its own revenue optimisation and the frequency cap
                     // (default: 1 impression per 10 minutes per subdomain), so a trigger is an
                     // eligibility, not a guarantee.
+                    //
+                    // continueReading is the closest thing to "show it by itself": GPT puts a
+                    // "View ad to continue" button on the page, BLURS the content under it and
+                    // blocks downward scrolling until the visitor taps that button. It needs no
+                    // link click and no 30 s wait — the first scroll attempt hits the blur.
+                    // (Google's own requirement: the page must be at least one viewport tall.)
                     var INTERSTITIAL_TRIGGERS = {
+                        continueReading: true,
                         inactivity: true,
                         endOfArticle: true,
                         unhideWindow: true,
