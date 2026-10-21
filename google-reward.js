@@ -376,6 +376,77 @@
                     // demonstrably does serve on this network (display_001 fills).
                     var useOwnInterstitial = window.interstitialSource !== 'pagelevel';
 
+                    /* ---------- WEB INTERSTITIAL TRIGGERS ---------- */
+                    // Google's own docs: web interstitials are "full-page ads that appear in
+                    // response to user actions" — they are NEVER shown just because the ad
+                    // filled. Only "clicked an <a> element" is enabled by default, and this
+                    // page has four footer links, so a FILLED interstitial sat on the page
+                    // unseen. These are the documented optional triggers:
+                    //   inactivity   → 30 s without interaction, then a click/scroll/key press
+                    //   endOfArticle → scrolled to the end of the <article> + 5 s (mobile)
+                    //   unhideWindow → the tab/window is hidden and comes back
+                    //   navBar       → the browser navigation bar is used (desktop)
+                    // Google still applies its own revenue optimisation and the frequency cap
+                    // (default: 1 impression per 10 minutes per subdomain), so a trigger is an
+                    // eligibility, not a guarantee.
+                    var INTERSTITIAL_TRIGGERS = {
+                        inactivity: true,
+                        endOfArticle: true,
+                        unhideWindow: true,
+                        navBar: true
+                    };
+                    // Test a different set without editing the file: ?intertrig=inactivity
+                    // (or ?intertrig=none to arm nothing).
+                    try {
+                        var trigParam = new URLSearchParams(window.location.search).get('intertrig');
+                        if (trigParam !== null) {
+                            INTERSTITIAL_TRIGGERS = {};
+                            trigParam.split(',').forEach(function (k) {
+                                k = (k || '').trim();
+                                if (k && k !== 'none') INTERSTITIAL_TRIGGERS[k] = true;
+                            });
+                        }
+                    } catch (e) { }
+
+                    var triggersArmed = false;
+
+                    function armInterstitialTriggers(slot) {
+                        if (triggersArmed || !slot) return;
+                        if (typeof slot.setConfig !== 'function') {
+                            console.log('This GPT build has no slot.setConfig() — optional interstitial triggers cannot be enabled from code.');
+                            triggersArmed = true;
+                            return;
+                        }
+                        try {
+                            slot.setConfig({ interstitial: { triggers: INTERSTITIAL_TRIGGERS } });
+                            triggersArmed = true;
+                            var names = Object.keys(INTERSTITIAL_TRIGGERS);
+                            console.log('Interstitial triggers armed on ' + slot.getAdUnitPath() + ': '
+                                + (names.length ? names.join(', ') : 'none')
+                                + ' — plus the always-enabled <a> link click. The ad shows on the next such action.');
+                        } catch (e) {
+                            console.log('Arming interstitial triggers failed: ' + e.message);
+                        }
+                    }
+
+                    // Google creates its page-level slot itself, so it may not exist yet.
+                    function findPageLevelInterstitialSlot() {
+                        var slots = [], found = null;
+                        try { slots = pubads.getSlots() || []; } catch (e) { return null; }
+                        for (var i = 0; i < slots.length; i++) {
+                            if (/\/Latest\d*$/.test(slots[i].getAdUnitPath() || '')) found = slots[i];
+                        }
+                        return found;
+                    }
+
+                    function armPageLevelInterstitial(left) {
+                        if (triggersArmed) return;
+                        var slot = findPageLevelInterstitialSlot();
+                        if (slot) { armInterstitialTriggers(slot); return; }
+                        if (left > 0) setTimeout(function () { armPageLevelInterstitial(left - 1); }, 1500);
+                        else console.log('No Google page-level interstitial slot was created on this page.');
+                    }
+
                     if (useOwnInterstitial) {
                         interSlot = findInterstitialSlot();
                         var interSlotIsNew = false;
@@ -387,6 +458,7 @@
                             interSlotIsNew = !!interSlot;
                         }
                         if (interSlot) {
+                            armInterstitialTriggers(interSlot);
                             if (interSlotIsNew) {
                                 interSlot.addService(pubads);
                                 interSlotId = interSlot.getSlotElementId();
@@ -401,14 +473,20 @@
                         // Registering nothing is the fix: it leaves the interstitial format
                         // free so the Google page-level ad can take it.
                         console.log('Interstitial: ' + window.adsKeys.interstitial_001 + ' is NOT registered (no eligible ad on that unit) — the format is left free for the Google page-level interstitial.');
+                        armPageLevelInterstitial(12);
                     }
 
                     // Diagnostic only: report what Google's page-level interstitial decides.
                     pubads.addEventListener('slotRenderEnded', function (e) {
                         var path = e.slot ? e.slot.getAdUnitPath() : '';
                         if (!path || path.indexOf('/Latest') === -1) return;
-                        console.log('Page-level interstitial ' + path + ': '
-                            + (e.isEmpty ? 'NO FILL (Google answered empty)' : 'FILLED → Google shows its full-screen ad'));
+                        if (e.isEmpty) {
+                            console.log('Page-level interstitial ' + path + ': NO FILL (Google answered empty)');
+                        } else {
+                            // Filled is NOT shown — Google waits for an eligible user action.
+                            armPageLevelInterstitial(1);
+                            console.log('Page-level interstitial ' + path + ': FILLED → waiting for an eligible user action (link click' + (triggersArmed ? ' or an armed trigger' : ')') + '.');
+                        }
                     });
 
                     /* ---------- ESCALATE: interstitial (up to 2 tries), then display ---------- */

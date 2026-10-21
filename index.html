@@ -118,6 +118,10 @@
       </div>
     </div>
 
+    <!-- Google's web interstitial "endOfArticle" trigger only fires on a page that has a
+         real <article> element (style.css uses descendant selectors under
+         .bottom-content, so this wrapper cannot change the layout). -->
+    <article class="main-article">
     <div class="bottom-content">
       <div class="featured-section mt-4">
         <h3>Why Choose Our Quiz Platform?</h3>
@@ -150,6 +154,7 @@
         </ol>
       </div>
     </div>
+    </article>
 
     <div class="quiz-card" id="resultCard" style="display: none;">
       <div class="result-card">
