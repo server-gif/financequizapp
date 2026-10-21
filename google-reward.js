@@ -34,7 +34,10 @@
     // content and then turned into an interstitial". While this is false, a display
     // unit is never requested into the overlay and never promoted, so an unfilled
     // interstitial simply shows nothing instead of falling back to a banner.
-    // Override for a single load with ?adfallback=on (or force off with ?adfallback=off).
+    // Override for one load with ?adfallback=on (or force off with ?adfallback=off).
+    // Related switch: window.interstitialSource in ads-keys.js (?inter=own|pagelevel)
+    // picks whether our GAM interstitial unit or Google's page-level ad gets the one
+    // interstitial format the page is allowed to register.
     var allowDisplayFallback = false;
     try {
         var fbParam = new URLSearchParams(window.location.search).get('adfallback');
@@ -359,27 +362,54 @@
                         return found;
                     }
 
-                    var interSlot = findInterstitialSlot();
-                    var interSlotIsNew = false;
-                    if (!interSlot) {
-                        interSlot = googletag.defineOutOfPageSlot(
-                            window.adsKeys.interstitial_001,
-                            googletag.enums.OutOfPageFormat.INTERSTITIAL
-                        );
-                        interSlotIsNew = !!interSlot;
-                    }
+                    var interSlot = null;
                     var interSlotId = null;
-                    if (interSlot) {
-                        if (interSlotIsNew) {
-                            interSlot.addService(pubads);
-                            interSlotId = interSlot.getSlotElementId();
-                            googletag.display(interSlot);
-                        } else {
-                            // already requested by ads-keys.js — GPT shows it itself when
-                            // it fills; re-displaying would log "Format already created".
-                            interSlotId = interSlot.getSlotElementId();
+                    // WHO GETS THE PAGE'S ONE INTERSTITIAL FORMAT? decided in ads-keys.js
+                    // (window.interstitialSource, overridable with ?inter=own|pagelevel).
+                    // 'pagelevel' is the default because the live measurements are blunt:
+                    // financequizapp_interstitial_001 answers EVERY request isEmpty:true with
+                    // lineItemId:null — at the out-of-page 1x1 AND at 320x480 / 300x250 /
+                    // 336x280 — so the ad unit simply has no eligible ad, while Google's
+                    // page-level ads logs "Interstitial /23338698373/Latest3 not requested:
+                    // Format already created on the page". Our empty unit is the thing
+                    // blocking Google's own interstitial, which draws on the demand that
+                    // demonstrably does serve on this network (display_001 fills).
+                    var useOwnInterstitial = window.interstitialSource !== 'pagelevel';
+
+                    if (useOwnInterstitial) {
+                        interSlot = findInterstitialSlot();
+                        var interSlotIsNew = false;
+                        if (!interSlot) {
+                            interSlot = googletag.defineOutOfPageSlot(
+                                window.adsKeys.interstitial_001,
+                                googletag.enums.OutOfPageFormat.INTERSTITIAL
+                            );
+                            interSlotIsNew = !!interSlot;
                         }
+                        if (interSlot) {
+                            if (interSlotIsNew) {
+                                interSlot.addService(pubads);
+                                interSlotId = interSlot.getSlotElementId();
+                                googletag.display(interSlot);
+                            } else {
+                                // already requested by ads-keys.js — GPT shows it itself when
+                                // it fills; re-displaying would log "Format already created".
+                                interSlotId = interSlot.getSlotElementId();
+                            }
+                        }
+                    } else {
+                        // Registering nothing is the fix: it leaves the interstitial format
+                        // free so the Google page-level ad can take it.
+                        console.log('Interstitial: ' + window.adsKeys.interstitial_001 + ' is NOT registered (no eligible ad on that unit) — the format is left free for the Google page-level interstitial.');
                     }
+
+                    // Diagnostic only: report what Google's page-level interstitial decides.
+                    pubads.addEventListener('slotRenderEnded', function (e) {
+                        var path = e.slot ? e.slot.getAdUnitPath() : '';
+                        if (!path || path.indexOf('/Latest') === -1) return;
+                        console.log('Page-level interstitial ' + path + ': '
+                            + (e.isEmpty ? 'NO FILL (Google answered empty)' : 'FILLED → Google shows its full-screen ad'));
+                    });
 
                     /* ---------- ESCALATE: interstitial (up to 2 tries), then display ---------- */
                     // GPT ignores display()/refresh() on an already-requested out-of-page
@@ -395,6 +425,13 @@
                     function escalateNow(reason) {
                         if (escalated) return;
                         escalated = true;
+                        if (!useOwnInterstitial) {
+                            // Nothing to escalate to: no banner is allowed and our own
+                            // interstitial unit is deliberately not registered.
+                            console.log('Rewarded unavailable (' + reason + ') → no full-screen ad requested by us; the Google page-level interstitial has the format.');
+                            fillReport('page-level interstitial mode');
+                            return;
+                        }
                         tryInterstitial(reason);
                     }
 

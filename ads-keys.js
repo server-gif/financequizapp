@@ -28,17 +28,40 @@ googletag.cmd.push(function () {
   }
 });
 
+// WHO OWNS THE PAGE'S ONE INTERSTITIAL FORMAT?
+// GPT allows exactly one out-of-page INTERSTITIAL per page. Measured on the live
+// site: /23338698373/financequizapp_interstitial_001 answers EVERY request with
+// isEmpty:true and lineItemId:null (at 1x1 out-of-page AND at 320x480/300x250/
+// 336x280), i.e. the ad unit has no eligible ad at all. At the same time Google's
+// own page-level ads script logs
+//   "[GPT] Interstitial /23338698373/Latest3 not requested: Format already created
+//    on the page."
+// — it wants to run a real interstitial and our empty unit is what blocks it.
+//   'pagelevel' → register nothing here, so Google's page-level interstitial can
+//                 serve (it draws on the same demand that fills display_001).
+//   'own'       → the old behaviour: our GAM ad unit takes the format.
+// Override for one load with ?inter=own or ?inter=pagelevel.
+window.interstitialSource = (function () {
+  try {
+    var q = new URLSearchParams(window.location.search).get("inter");
+    if (q === "own" || q === "pagelevel") return q;
+  } catch (e) {}
+  return "pagelevel";
+})();
+
 googletag.cmd.push(function () {
-  interstitialSlot = googletag.defineOutOfPageSlot(
-    adsKeys.interstitial_001,
-    googletag.enums.OutOfPageFormat.INTERSTITIAL,
-  );
+  if (window.interstitialSource === "own") {
+    interstitialSlot = googletag.defineOutOfPageSlot(
+      adsKeys.interstitial_001,
+      googletag.enums.OutOfPageFormat.INTERSTITIAL,
+    );
 
-  if (interstitialSlot) {
-    interstitialSlot.addService(googletag.pubads());
-
-    googletag.enableServices();
+    if (interstitialSlot) interstitialSlot.addService(googletag.pubads());
   }
+
+  // enableServices() has to run either way — it used to sit inside the slot check,
+  // so skipping the interstitial would have stopped every other ad request too.
+  googletag.enableServices();
 });
 
 /*-------------- End ----------------------*/
